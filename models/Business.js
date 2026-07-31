@@ -39,6 +39,12 @@ module.exports = (sequelize, DataTypes) => {
     if (models.Permission) {
       Business.hasMany(models.Permission, { foreignKey: 'business_id', as: 'permissions' });
     }
+    if (models.SocialNumber) {
+      Business.hasMany(models.SocialNumber, { foreignKey: 'business_id', as: 'socialNumbers' });
+    }
+    if (models.BusinessSocial) {
+      Business.hasMany(models.BusinessSocial, { foreignKey: 'business_id', as: 'businessSocials' });
+    }
   };
 
   return Business;
