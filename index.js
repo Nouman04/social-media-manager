@@ -1,5 +1,6 @@
 require("dotenv").config();
 const express = require("express");
+const path = require("path");
 const bodyParser = require("body-parser");
 const cors = require("cors");
 const passport = require("passport");
@@ -8,6 +9,7 @@ const initializePassport = require("./src/config/passportConfig");
 const twoFactorAuthRoutes = require("./src/routes/twoFactorAuthRoutes");
 const rbacRoutes = require("./src/routes/rbacRoutes");
 const businessRoutes = require("./src/routes/businessRoutes");
+const whatsappRoutes = require("./src/routes/whatsappRoutes");
 
 const app = express();
 const PORT = process.env.NODE_PORT || process.env.PORT || 5000;
@@ -19,9 +21,13 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(passport.initialize());
 
+// ── Serve locally saved media files (downloaded from Meta)
+app.use('/public', express.static(path.join(__dirname, 'src/public')));
+
 app.use("/auth", twoFactorAuthRoutes);
 app.use("/rbac", rbacRoutes);
 app.use("/business", businessRoutes);
+app.use("/api/v1/whatsapp", whatsappRoutes);
 
 app.get("/", (req, res) => {
   res.json({ success: true, message: "SMM API Server Running" });

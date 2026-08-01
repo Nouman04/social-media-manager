@@ -9,7 +9,7 @@ module.exports = {
         autoIncrement: true,
         allowNull: false,
       },
-      user_id: {
+      created_by: {
         type: Sequelize.INTEGER,
         allowNull: false,
       },

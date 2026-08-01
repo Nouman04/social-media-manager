@@ -7,7 +7,7 @@ module.exports = (sequelize, DataTypes) => {
       autoIncrement: true,
       allowNull: false,
     },
-    user_id: {
+    created_by: {
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
@@ -28,9 +28,9 @@ module.exports = (sequelize, DataTypes) => {
     updatedAt: 'updated_at',
   });
 
-  Business.associate = function(models) {
+  Business.associate = function (models) {
     if (models.User) {
-      Business.belongsTo(models.User, { foreignKey: 'user_id', as: 'owner' });
+      Business.belongsTo(models.User, { foreignKey: 'created_by', as: 'owner' });
       Business.hasMany(models.User, { foreignKey: 'business_id', as: 'members' });
     }
     if (models.Role) {
@@ -44,6 +44,15 @@ module.exports = (sequelize, DataTypes) => {
     }
     if (models.BusinessSocial) {
       Business.hasMany(models.BusinessSocial, { foreignKey: 'business_id', as: 'businessSocials' });
+    }
+    if (models.WhatsappDetail) {
+      Business.hasMany(models.WhatsappDetail, { foreignKey: 'business_id', as: 'whatsappDetails' });
+    }
+    if (models.WhatsappMessage) {
+      Business.hasMany(models.WhatsappMessage, { foreignKey: 'business_id', as: 'whatsappMessages' });
+    }
+    if (models.WhatsappTemplate) {
+      Business.hasMany(models.WhatsappTemplate, { foreignKey: 'business_id', as: 'whatsappTemplates' });
     }
   };
 
