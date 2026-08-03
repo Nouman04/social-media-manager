@@ -27,6 +27,20 @@ module.exports = (sequelize, DataTypes) => {
   });
 
   Address.associate = function(models) {
+    if (models.Business) {
+      Address.belongsTo(models.Business, {
+        foreignKey: 'addressable_id',
+        constraints: false,
+        as: 'business',
+      });
+    }
+  };
+
+  // Resolve the owning record for a polymorphic address row.
+  Address.prototype.getAddressable = function (options) {
+    const mixinMethod = `get${this.addressable_type}`;
+    if (typeof this[mixinMethod] !== 'function') return Promise.resolve(null);
+    return this[mixinMethod](options);
   };
 
   return Address;

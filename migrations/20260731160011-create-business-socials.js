@@ -20,12 +20,10 @@ module.exports = {
         type: Sequelize.ENUM('tiktok', 'instagram', 'whatsapp', 'facebook'),
         allowNull: false,
       },
-      business_number: {
-        type: Sequelize.INTEGER,
+      phone: {
+        type: Sequelize.STRING(20),
         allowNull: true,
-        references: { model: 'social_numbers', key: 'id' },
-        onUpdate: 'CASCADE',
-        onDelete: 'SET NULL',
+        unique: true, // The business's own number for this social account
       },
       is_activated: {
         type: Sequelize.BOOLEAN,

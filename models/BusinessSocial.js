@@ -21,15 +21,10 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.ENUM('tiktok', 'instagram', 'whatsapp', 'facebook'),
       allowNull: false,
     },
-    business_number: {
-      type: DataTypes.INTEGER,
+    phone: {
+      type: DataTypes.STRING(20),
       allowNull: true,
-      references: {
-        model: 'social_numbers',
-        key: 'id',
-      },
-      onUpdate: 'CASCADE',
-      onDelete: 'SET NULL',
+      unique: true, // the business's own number for this social account
     },
     is_activated: {
       type: DataTypes.BOOLEAN,
@@ -50,7 +45,15 @@ module.exports = (sequelize, DataTypes) => {
       BusinessSocial.belongsTo(models.Business, { foreignKey: 'business_id', as: 'business' });
     }
     if (models.SocialNumber) {
-      BusinessSocial.belongsTo(models.SocialNumber, { foreignKey: 'business_number', as: 'socialNumber' });
+      BusinessSocial.belongsToMany(models.SocialNumber, {
+        through: models.BusinessSocialNumber || 'business_social_numbers',
+        foreignKey: 'business_social_id',
+        otherKey: 'social_number_id',
+        as: 'socialNumbers',
+      });
+    }
+    if (models.BusinessSocialNumber) {
+      BusinessSocial.hasMany(models.BusinessSocialNumber, { foreignKey: 'business_social_id', as: 'socialNumberLinks' });
     }
   };
 

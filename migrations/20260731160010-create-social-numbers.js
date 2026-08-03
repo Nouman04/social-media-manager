@@ -16,6 +16,11 @@ module.exports = {
         onUpdate: 'CASCADE',
         onDelete: 'CASCADE',
       },
+      phone_number: {
+        type: Sequelize.STRING(20),
+        allowNull: false,
+        unique: true, // Remove this if duplicate numbers are allowed
+      },
       is_activated: {
         type: Sequelize.BOOLEAN,
         allowNull: false,

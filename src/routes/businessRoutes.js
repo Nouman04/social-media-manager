@@ -28,4 +28,14 @@ router.delete('/business-socials/:id', businessController.deleteBusinessSocial);
 router.post('/business-socials/:id/sync', businessController.syncSocialNumber);
 router.delete('/business-socials/:id/sync', businessController.unsyncSocialNumber);
 
+// ─── Businesses ───────────────────────────────────────────────────────────────
+// NOTE: the `/:id` routes are declared at the bottom of this file so the static
+// `/social-numbers` and `/business-socials` paths are matched first.
+router.post('/', businessController.createBusiness);
+router.get('/', businessController.getBusinesses);
+router.get('/:businessId/social-numbers', businessController.getSocialNumbersByBusiness);
+router.get('/:id', businessController.getBusinessById);
+router.put('/:id', businessController.updateBusiness);
+router.delete('/:id', businessController.deleteBusiness);
+
 module.exports = router;

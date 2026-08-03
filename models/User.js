@@ -58,7 +58,7 @@ module.exports = (sequelize, DataTypes) => {
   User.associate = function(models) {
     if (models.Business) {
       User.belongsTo(models.Business, { foreignKey: 'business_id', as: 'business' });
-      User.hasMany(models.Business, { foreignKey: 'user_id', as: 'ownedBusinesses' });
+      User.hasMany(models.Business, { foreignKey: 'created_by', as: 'ownedBusinesses' });
     }
 
     if (models.Profile) {

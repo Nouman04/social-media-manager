@@ -17,6 +17,11 @@ module.exports = (sequelize, DataTypes) => {
       onUpdate: 'CASCADE',
       onDelete: 'CASCADE',
     },
+    phone_number: {
+      type: DataTypes.STRING(20),
+      allowNull: false,
+      unique: true, // Remove this if duplicate numbers are allowed
+    },
     is_activated: {
       type: DataTypes.BOOLEAN,
       allowNull: false,
@@ -36,7 +41,15 @@ module.exports = (sequelize, DataTypes) => {
       SocialNumber.belongsTo(models.Business, { foreignKey: 'business_id', as: 'business' });
     }
     if (models.BusinessSocial) {
-      SocialNumber.hasMany(models.BusinessSocial, { foreignKey: 'business_number', as: 'socials' });
+      SocialNumber.belongsToMany(models.BusinessSocial, {
+        through: models.BusinessSocialNumber || 'business_social_numbers',
+        foreignKey: 'social_number_id',
+        otherKey: 'business_social_id',
+        as: 'businessSocials',
+      });
+    }
+    if (models.BusinessSocialNumber) {
+      SocialNumber.hasOne(models.BusinessSocialNumber, { foreignKey: 'social_number_id', as: 'businessSocialLink' });
     }
   };
 

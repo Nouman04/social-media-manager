@@ -776,7 +776,8 @@ const whatsappService = {
           where: { type: 'whatsapp' },
           include: [{
             model: SocialNumber,
-            as: 'socialNumber'
+            as: 'socialNumbers',
+            through: { attributes: [] }
           }]
         }]
       }]

@@ -21,6 +21,11 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.STRING,
       allowNull: false,
     },
+    is_active: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
+    },
   }, {
     tableName: 'businesses',
     timestamps: true,
@@ -53,6 +58,15 @@ module.exports = (sequelize, DataTypes) => {
     }
     if (models.WhatsappTemplate) {
       Business.hasMany(models.WhatsappTemplate, { foreignKey: 'business_id', as: 'whatsappTemplates' });
+    }
+    if (models.Address) {
+      // Polymorphic: addresses.addressable_id -> businesses.id where addressable_type = 'Business'
+      Business.hasOne(models.Address, {
+        foreignKey: 'addressable_id',
+        constraints: false,
+        scope: { addressable_type: 'Business' },
+        as: 'address',
+      });
     }
   };
 
