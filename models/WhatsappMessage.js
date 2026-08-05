@@ -9,11 +9,11 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: false,
     },
 
-    // ── Tenant linkage ───────────────────────────────────────────────────────
-    business_id: {
+    // ── Conversation linkage ──────────────────────────────────────────────────
+    conversation_id: {
       type: DataTypes.INTEGER,
       allowNull: false,
-      references: { model: 'businesses', key: 'id' },
+      references: { model: 'conversations', key: 'id' },
       onUpdate: 'CASCADE',
       onDelete: 'CASCADE',
     },
@@ -77,10 +77,10 @@ module.exports = (sequelize, DataTypes) => {
   });
 
   WhatsappMessage.associate = function (models) {
-    if (models.Business) {
-      WhatsappMessage.belongsTo(models.Business, {
-        foreignKey: 'business_id',
-        as: 'business',
+    if (models.Conversation) {
+      WhatsappMessage.belongsTo(models.Conversation, {
+        foreignKey: 'conversation_id',
+        as: 'conversation',
       });
     }
   };

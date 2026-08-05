@@ -82,6 +82,16 @@ module.exports = (sequelize, DataTypes) => {
         as: 'permissions'
       });
     }
+
+    if (models.Conversation) {
+      User.hasMany(models.Conversation, { foreignKey: 'created_by', as: 'createdConversations' });
+      User.belongsToMany(models.Conversation, {
+        through: models.ConversationParticipant || 'conversation_participants',
+        foreignKey: 'user_id',
+        otherKey: 'conversation_id',
+        as: 'conversations'
+      });
+    }
   };
 
   return User;

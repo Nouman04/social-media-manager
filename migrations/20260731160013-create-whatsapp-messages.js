@@ -10,14 +10,14 @@ module.exports = {
         allowNull: false,
       },
 
-      // ── Tenant linkage ───────────────────────────────────────────────────
-      business_id: {
+      // ── Conversation linkage ─────────────────────────────────────────────
+      conversation_id: {
         type: Sequelize.INTEGER,
         allowNull: false,
-        references: { model: 'businesses', key: 'id' },
+        references: { model: 'conversations', key: 'id' },
         onUpdate: 'CASCADE',
         onDelete: 'CASCADE',
-        comment: 'Which business/tenant sent or received this message',
+        comment: 'Which conversation this message belongs to',
       },
 
       // ── Parties ──────────────────────────────────────────────────────────
@@ -96,9 +96,9 @@ module.exports = {
       name: 'idx_whatsapp_messages_wamid',
     });
 
-    // Index on (business_id, status) for tenant inbox queries
-    await queryInterface.addIndex('whatsapp_messages', ['business_id', 'status'], {
-      name: 'idx_whatsapp_messages_business_status',
+    // Index on (conversation_id, status) for conversation inbox queries
+    await queryInterface.addIndex('whatsapp_messages', ['conversation_id', 'status'], {
+      name: 'idx_whatsapp_messages_conversation_status',
     });
   },
 

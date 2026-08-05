@@ -53,11 +53,11 @@ module.exports = (sequelize, DataTypes) => {
     if (models.WhatsappDetail) {
       Business.hasMany(models.WhatsappDetail, { foreignKey: 'business_id', as: 'whatsappDetails' });
     }
-    if (models.WhatsappMessage) {
-      Business.hasMany(models.WhatsappMessage, { foreignKey: 'business_id', as: 'whatsappMessages' });
-    }
     if (models.WhatsappTemplate) {
       Business.hasMany(models.WhatsappTemplate, { foreignKey: 'business_id', as: 'whatsappTemplates' });
+    }
+    if (models.Conversation) {
+      Business.hasMany(models.Conversation, { foreignKey: 'business_id', as: 'conversations' });
     }
     if (models.Address) {
       // Polymorphic: addresses.addressable_id -> businesses.id where addressable_type = 'Business'
