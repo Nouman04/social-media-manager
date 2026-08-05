@@ -58,7 +58,7 @@ module.exports = (sequelize, DataTypes) => {
   User.associate = function(models) {
     if (models.Business) {
       User.belongsTo(models.Business, { foreignKey: 'business_id', as: 'business' });
-      User.hasMany(models.Business, { foreignKey: 'user_id', as: 'ownedBusinesses' });
+      User.hasMany(models.Business, { foreignKey: 'created_by', as: 'ownedBusinesses' });
     }
 
     if (models.Profile) {
@@ -80,6 +80,16 @@ module.exports = (sequelize, DataTypes) => {
         foreignKey: 'user_id',
         otherKey: 'permission_id',
         as: 'permissions'
+      });
+    }
+
+    if (models.Conversation) {
+      User.hasMany(models.Conversation, { foreignKey: 'created_by', as: 'createdConversations' });
+      User.belongsToMany(models.Conversation, {
+        through: models.ConversationParticipant || 'conversation_participants',
+        foreignKey: 'user_id',
+        otherKey: 'conversation_id',
+        as: 'conversations'
       });
     }
   };

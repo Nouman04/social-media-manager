@@ -2,25 +2,29 @@
 
 module.exports = {
   up: async (queryInterface, Sequelize) => {
-    await queryInterface.createTable('businesses', {
+    await queryInterface.createTable('social_numbers', {
       id: {
         type: Sequelize.INTEGER,
         primaryKey: true,
         autoIncrement: true,
         allowNull: false,
       },
-      created_by: {
+      business_id: {
         type: Sequelize.INTEGER,
         allowNull: false,
+        references: { model: 'businesses', key: 'id' },
+        onUpdate: 'CASCADE',
+        onDelete: 'CASCADE',
       },
-      name: {
-        type: Sequelize.STRING,
+      phone_number: {
+        type: Sequelize.STRING(20),
         allowNull: false,
+        unique: true, // Remove this if duplicate numbers are allowed
       },
-      is_active: {
+      is_activated: {
         type: Sequelize.BOOLEAN,
         allowNull: false,
-        defaultValue: true,
+        defaultValue: false,
       },
       created_at: {
         type: Sequelize.DATE,
@@ -32,10 +36,14 @@ module.exports = {
         allowNull: false,
         defaultValue: Sequelize.literal('CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'),
       },
+      deleted_at: {
+        type: Sequelize.DATE,
+        allowNull: true,
+      },
     });
   },
 
   down: async (queryInterface, Sequelize) => {
-    await queryInterface.dropTable('businesses');
+    await queryInterface.dropTable('social_numbers');
   },
 };

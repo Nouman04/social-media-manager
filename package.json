@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "dev": "nodemon index.js",
     "test": "echo \"Error: no test specified\" && exit 1",
     "make:migration": "npx sequelize-cli migration:generate --migrations-path migrations --name",
     "migrate:one": "npx sequelize-cli db:migrate --config config/config.js --migrations-path migrations --name",
@@ -12,6 +13,8 @@
     "db:migrate": "npx sequelize-cli db:migrate --config config/config.js --migrations-path migrations",
     "migrate:rollback": "npx sequelize-cli db:migrate:undo:all --config config/config.js --migrations-path migrations",
     "migrate:rollback:one": "npx sequelize-cli db:migrate:undo --config config/config.js --migrations-path migrations --name",
+    "migrate:fresh": "npm run migrate:rollback && npm run db:migrate",
+    "migrate:fresh:seed": "npm run migrate:fresh && npm run db:seed",
     "make:seeder": "npx sequelize-cli seed:generate --seeders-path seeders --name",
     "db:seed": "npx sequelize-cli db:seed:all --config config/config.js --seeders-path seeders",
     "seed:one": "npx sequelize-cli db:seed --config config/config.js --seeders-path seeders --seed"
@@ -21,13 +24,16 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "axios": "^1.19.0",
     "bcrypt": "^5.1.1",
     "body-parser": "^1.20.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "form-data": "^4.0.6",
     "joi": "^17.13.3",
     "jsonwebtoken": "^9.0.2",
+    "multer": "^2.2.0",
     "mysql2": "^3.11.5",
     "nodemailer": "^6.10.0",
     "passport": "^0.7.0",
@@ -35,6 +41,7 @@
     "sequelize": "^6.37.8"
   },
   "devDependencies": {
+    "nodemon": "^3.1.14",
     "sequelize-cli": "^6.6.2"
   }
 }
