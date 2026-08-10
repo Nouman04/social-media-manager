@@ -33,6 +33,11 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: false,
       comment: 'WhatsApp Business Account ID',
     },
+    display_phone_number: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+      comment: 'Normalized (digits-only) display phone number — used to match Meta phone_number_quality_update webhook events to a tenant',
+    },
 
     // ── Auth ────────────────────────────────────────────────────────────────
     access_token: {

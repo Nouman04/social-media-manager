@@ -1,0 +1,177 @@
+========================================================
+WHATSAPP API DOCUMENTATION (Roman Urdu)
+File: src/routes/whatsappRoutes.js
+========================================================
+
+Ye file WhatsApp Business API ke saare routes ko define karti hai.
+Neeche har ek API ka purpose aur usage aasan Roman Urdu mein likha gya hai.
+
+--------------------------------------------------------
+1) PUBLIC ROUTES (Bina JWT Auth ke)
+--------------------------------------------------------
+Ye routes bina kisi login/token ke access hote hain, kyunke inko Meta
+(Facebook/WhatsApp) ke servers khud call karte hain, aur Meta apne
+requests mein auth header nahi bhejta. Isliye ye JWT middleware se
+PEHLE define kiye gaye hain.
+
+1.1) GET /api/v1/whatsapp/webhook
+Purpose: Ye webhook verification ka endpoint hai. Jab hum Meta Developer
+Console mein apna webhook URL set/save karte hain, to Meta is URL par
+ek GET request bhejta hai with "hub.challenge" aur "hub.verify_token".
+Ye API check karti hai ke verify_token match ho raha hai ya nahi, agar
+match ho jaye to "hub.challenge" wapis echo (return) kar deti hai. Isse
+Meta ko pata chal jata hai ke ye webhook genuine hai.
+Controller: whatsappController.verifyWebhook
+
+1.2) POST /api/v1/whatsapp/webhook
+Purpose: Ye main webhook hai jahan Meta real-time events bhejta hai —
+jaise naye incoming messages, message status updates (sent/delivered/
+read/failed), aur account se related alerts/notifications. Jese hi
+request aati hai, ye API turant 200 OK response bhej deti hai (taake
+Meta ko lage sab theek hai) aur processing background mein
+(fire-and-forget tareeqe se) hoti hai.
+Controller: whatsappController.handleWebhook
+
+--------------------------------------------------------
+2) JWT AUTH MIDDLEWARE
+--------------------------------------------------------
+Is line ke baad wale saare routes protected hain, matlab in APIs ko
+call karne ke liye valid JWT token (login token) zaroori hai. Ye
+middleware "passport" library use karke request ke Authorization
+header se token verify karta hai aur "req.user" mein user set karta
+hai.
+
+--------------------------------------------------------
+3) PROTECTED ROUTES (JWT Token Zaroori Hai)
+--------------------------------------------------------
+
+3.1) GET /api/v1/whatsapp/verify-credentials
+Query Params: phone_number_id, access_token
+Purpose: Ye API check karti hai ke jo WhatsApp Business credentials
+(phone_number_id aur access_token) user ne diye hain, wo Meta ke
+Graph API ke against valid hain ya nahi. Matlab user ka WhatsApp
+Business account connect karne se pehle uski verification hoti hai.
+Controller: whatsappController.verifyCredentials
+
+3.2) GET /api/v1/whatsapp/business-profile
+Query Params: phone_number_id, access_token
+Purpose: User ka WhatsApp Business profile (jaise business name,
+description, address, email, website, profile picture etc.) fetch
+(hasil) karne ke liye.
+Controller: whatsappController.getBusinessProfile
+
+3.3) POST /api/v1/whatsapp/business-profile
+Query Params: phone_number_id, access_token
+Purpose: WhatsApp Business profile ki details update karne ke liye —
+jaise business ka about, address, description, email, website waghera
+change karna.
+Controller: whatsappController.updateProfile
+
+3.4) POST /api/v1/whatsapp/account
+Body: { business_id, phone_number_id, waba_id, access_token,
+display_phone_number (optional) }
+Purpose: Ye API vendor ko apna WhatsApp Business Account system ke
+saath connect/add karne deti hai. Jab koi naya vendor apna WhatsApp
+number system mein add karna chahta hai, to wo yahan apna
+phone_number_id, waba_id (WhatsApp Business Account ID), aur
+access_token bhejta hai. Ye API pehle in credentials ko Meta ke Graph
+API se verify karti hai (check karti hai ke ye sahi hain aur kaam kar
+rahe hain), agar valid hoon to hi database mein save karti hai —
+warna galat/invalid credentials save nahi hongi. Agar
+display_phone_number nahi diya gaya to wo bhi Meta se khud-b-khud
+fetch ho jata hai. Ek phone_number_id sirf ek hi business se connect
+ho sakta hai (duplicate connect karne par error milega).
+Controller: whatsappController.addAccount
+
+--------------------------------------------------------
+4) OUTBOUND MESSAGING (Messages Bhejne Wali APIs)
+--------------------------------------------------------
+
+4.1) POST /api/v1/whatsapp/send/template
+Body: { business_id, to, template_name, language_code (optional),
+components (optional) }
+Purpose: Pehle se approved (Meta se manzoor shuda) template message
+bhejne ke liye. Ye tab use hoti hai jab user ke saath naya conversation
+start karna ho ya 24-hour window band ho chuki ho (kyunke sirf
+template messages hi 24 ghante ke bahar bheji ja sakti hain).
+Controller: whatsappController.sendTemplate
+
+4.2) POST /api/v1/whatsapp/send/text
+Body: { business_id, to, body, preview_url (optional) }
+Purpose: Simple free-form text message (normal chat wala message)
+bhejne ke liye, lekin ye sirf tab kaam karta hai jab user ke saath
+24-hour active window chal rahi ho (yani user ne 24 ghante ke andar
+message kiya ho).
+Controller: whatsappController.sendText
+
+4.3) POST /api/v1/whatsapp/send/media
+Body: { business_id, to, media_type, media_url, caption (optional),
+filename (optional) }
+Purpose: Image, document, audio ya video jaisi media files bhejne ke
+liye — media ek public URL ke zariye bheji jati hai.
+Controller: whatsappController.sendMedia
+
+--------------------------------------------------------
+5) TEMPLATE MANAGEMENT (Templates Ka Management)
+--------------------------------------------------------
+
+5.1) GET /api/v1/whatsapp/templates
+Query Params: business_id, force_sync
+Purpose: Existing (pehle se bane hue) message templates ko fetch karne
+ke liye. Ye Meta API se sync karke aur local database cache se bhi
+templates la sakta hai (saath mein status badge colors bhi milte hain
+jaise approved/pending/rejected).
+Controller: whatsappController.getTemplates
+
+5.2) POST /api/v1/whatsapp/templates
+Body: { business_id, name, category, language (optional), components }
+Purpose: Naya message template banane aur Meta ko review ke liye
+submit karne ke liye. Template approve hone ke baad hi use ho sakta
+hai.
+Controller: whatsappController.createTemplate
+
+5.3) DELETE /api/v1/whatsapp/templates
+Query Params: business_id, name
+Purpose: Kisi existing template ko Meta ke system se aur local
+database se delete (remove) karne ke liye.
+Controller: whatsappController.deleteTemplate
+
+--------------------------------------------------------
+6) ACCOUNT HEALTH & QUALITY MONITORING
+--------------------------------------------------------
+
+6.1) GET /api/v1/whatsapp/health
+Query Params: business_id
+Purpose: WhatsApp Business account ki health/quality status check
+karne ke liye — jaise quality rating (High/Medium/Low) aur messaging
+limit tier. Ye information fetch karke database mein bhi update kar
+di jati hai.
+Controller: whatsappController.getAccountHealth
+
+--------------------------------------------------------
+7) MEDIA HANDLING (Media Upload/Download)
+--------------------------------------------------------
+
+7.1) POST /api/v1/whatsapp/media
+Body: form-data with "file" field (max size 100MB)
+Purpose: Koi bhi media file (image, PDF, video etc.) Meta ke server
+par upload karne ke liye. Upload hone ke baad Meta ek "media_id"
+deta hai jo aage messages bhejne mein (jaise send/media API mein)
+use hota hai.
+Middleware: multer (file upload handle karne ke liye, 100MB limit)
+Controller: whatsappController.uploadMedia
+
+7.2) GET /api/v1/whatsapp/media
+Query Params: business_id, media_id
+Purpose: Kisi media_id ke zariye media file ko Meta se retrieve
+(hasil) karna, download karna, aur local cache mein save karna — taake
+baar baar Meta se download na karna pade.
+Controller: whatsappController.downloadMedia
+
+========================================================
+NOTE:
+- Sab "PROTECTED ROUTES" ko call karne ke liye Authorization header
+  mein valid JWT Bearer token bhejna zaroori hai.
+- "PUBLIC ROUTES" (webhook wale) sirf Meta ke servers ke liye hain,
+  inko manually call karne ki zarurat nahi hoti.
+========================================================

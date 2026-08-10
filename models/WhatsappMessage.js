@@ -33,6 +33,24 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: true,
     },
 
+    // ── Internal user linkage ────────────────────────────────────────────────
+    sender_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: 'users', key: 'id' },
+      onUpdate: 'CASCADE',
+      onDelete: 'SET NULL',
+      comment: 'System user who sent this message (outbound) — null for inbound messages',
+    },
+    receiver_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: 'users', key: 'id' },
+      onUpdate: 'CASCADE',
+      onDelete: 'SET NULL',
+      comment: 'System user this message is addressed to (inbound) — null for outbound messages',
+    },
+
     // ── Message type & content ─────────────────────────────────────────────────
     message_type: {
       type: DataTypes.ENUM('template', 'text', 'image', 'document', 'audio', 'video'),
@@ -82,6 +100,10 @@ module.exports = (sequelize, DataTypes) => {
         foreignKey: 'conversation_id',
         as: 'conversation',
       });
+    }
+    if (models.User) {
+      WhatsappMessage.belongsTo(models.User, { foreignKey: 'sender_id', as: 'sender' });
+      WhatsappMessage.belongsTo(models.User, { foreignKey: 'receiver_id', as: 'receiver' });
     }
   };
 

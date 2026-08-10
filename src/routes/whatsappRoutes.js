@@ -53,6 +53,15 @@ router.get('/business-profile', whatsappController.getBusinessProfile);
  */
 router.post('/business-profile', whatsappController.updateProfile);
 
+// ─── ACCOUNT MANAGEMENT ─────────────────────────────────────────────────────────
+
+/**
+ * POST /api/v1/whatsapp/account
+ * Connect a vendor's WhatsApp Business Account (phone_number_id, waba_id, access_token).
+ * Body: { business_id, phone_number_id, waba_id, access_token, display_phone_number? }
+ */
+router.post('/account', whatsappController.addAccount);
+
 // ─── OUTBOUND MESSAGING ────────────────────────────────────────────────────────
 
 /**

@@ -63,9 +63,6 @@ module.exports = (sequelize, DataTypes) => {
     if (models.ConversationParticipant) {
       Conversation.hasMany(models.ConversationParticipant, { foreignKey: 'conversation_id', as: 'participantLinks' });
     }
-    if (models.WhatsappMessage) {
-      Conversation.hasMany(models.WhatsappMessage, { foreignKey: 'conversation_id', as: 'whatsappMessages' });
-    }
   };
 
   return Conversation;

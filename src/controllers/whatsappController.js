@@ -194,6 +194,59 @@ module.exports = {
   },
 
   // ══════════════════════════════════════════════════════════════════════════
+  //  3c. ADD WHATSAPP BUSINESS ACCOUNT
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * POST /api/v1/whatsapp/account
+   *
+   * Connects a vendor's WhatsApp Business Account to their business.
+   * Credentials are verified against the Graph API before being saved.
+   *
+   * Body:
+   *   - business_id            {number} required — tenant ID
+   *   - phone_number_id        {string} required — Meta Phone Number ID
+   *   - waba_id                {string} required — WhatsApp Business Account ID
+   *   - access_token           {string} required — permanent/system-user access token
+   *   - display_phone_number   {string} optional — auto-fetched from Meta if omitted
+   */
+  addAccount: async (req, res) => {
+    try {
+      const { business_id, phone_number_id, waba_id, access_token, display_phone_number } = req.body;
+
+      const missing = [];
+      if (!business_id)     missing.push('business_id is required');
+      if (!phone_number_id) missing.push('phone_number_id is required');
+      if (!waba_id)          missing.push('waba_id is required');
+      if (!access_token)    missing.push('access_token is required');
+
+      if (missing.length) {
+        return res.status(400).json({ success: false, message: 'Validation failed', details: missing });
+      }
+
+      const account = await whatsappService.addAccount(business_id, {
+        phone_number_id,
+        waba_id,
+        access_token,
+        display_phone_number,
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: 'WhatsApp business account connected successfully',
+        account,
+      });
+    } catch (err) {
+      console.error('[whatsappController.addAccount] Error:', err?.response?.data || err.message);
+      return res.status(err.statusCode || 500).json({
+        success: false,
+        message: err.message,
+        ...(err.metaError && { metaError: err.metaError }),
+      });
+    }
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════
   //  4. WEBHOOK — GET (Meta verification handshake)
   // ══════════════════════════════════════════════════════════════════════════
 
@@ -272,10 +325,11 @@ module.exports = {
    *   - template_name  {string}  required — approved template name in Meta
    *   - language_code  {string}  optional — default 'en_US'
    *   - components     {Array}   optional — template component params
+   *   - receiver_id    {number}  optional — system user this message is associated with
    */
   sendTemplate: async (req, res) => {
     try {
-      const { business_id, to, template_name, language_code = 'en_US', components = [] } = req.body;
+      const { business_id, to, template_name, language_code = 'en_US', components = [], receiver_id = null } = req.body;
 
       const missing = [];
       if (!business_id)   missing.push('business_id is required');
@@ -287,7 +341,7 @@ module.exports = {
       }
 
       const { record, metaResponse } = await whatsappService.sendTemplateMessage(
-        business_id, to, template_name, language_code, components
+        business_id, to, template_name, language_code, components, req.user?.id || null, receiver_id
       );
 
       return res.status(200).json({
@@ -321,10 +375,11 @@ module.exports = {
    *   - to           {string}  required — digits only with country code
    *   - body         {string}  required — message text
    *   - preview_url  {boolean} optional — default false
+   *   - receiver_id  {number}  optional — system user this message is associated with
    */
   sendText: async (req, res) => {
     try {
-      const { business_id, to, body: messageBody, preview_url = false } = req.body;
+      const { business_id, to, body: messageBody, preview_url = false, receiver_id = null } = req.body;
 
       const missing = [];
       if (!business_id)  missing.push('business_id is required');
@@ -336,7 +391,7 @@ module.exports = {
       }
 
       const { record, metaResponse } = await whatsappService.sendTextMessage(
-        business_id, to, messageBody, preview_url
+        business_id, to, messageBody, preview_url, req.user?.id || null, receiver_id
       );
 
       return res.status(200).json({
@@ -372,10 +427,11 @@ module.exports = {
    *   - media_url    {string}                            required — publicly accessible URL
    *   - caption      {string}                            optional — image / document only
    *   - filename     {string}                            optional — document only
+   *   - receiver_id  {number}                            optional — system user this message is associated with
    */
   sendMedia: async (req, res) => {
     try {
-      const { business_id, to, media_type, media_url, caption = '', filename = '' } = req.body;
+      const { business_id, to, media_type, media_url, caption = '', filename = '', receiver_id = null } = req.body;
 
       const missing = [];
       if (!business_id) missing.push('business_id is required');
@@ -388,7 +444,7 @@ module.exports = {
       }
 
       const { record, metaResponse } = await whatsappService.sendMediaMessage(
-        business_id, to, media_type, media_url, caption, filename
+        business_id, to, media_type, media_url, caption, filename, req.user?.id || null, receiver_id
       );
 
       return res.status(200).json({

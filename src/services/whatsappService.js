@@ -41,7 +41,7 @@ const getTenantCredentials = async (businessId) => {
  * Persist an outbound message record and return it.
  * Sets status = 'queued'.
  */
-const createMessageRecord = async (businessId, toNumber, messageType, payload) => {
+const createMessageRecord = async (businessId, toNumber, messageType, payload, senderId = null, receiverId = null) => {
   return WhatsappMessage.create({
     business_id: businessId,
     direction: 'outbound',
@@ -49,6 +49,8 @@ const createMessageRecord = async (businessId, toNumber, messageType, payload) =
     message_type: messageType,
     payload,
     status: 'queued',
+    sender_id: senderId,
+    receiver_id: receiverId,
   });
 };
 
@@ -162,6 +164,70 @@ const whatsappService = {
   },
 
   // ══════════════════════════════════════════════════════════════════════════
+  //  3c. ADD WHATSAPP BUSINESS ACCOUNT
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Connect a vendor's WhatsApp Business Account to a business (tenant).
+   * Verifies the phone_number_id/access_token pair against the Graph API
+   * before persisting, and auto-fills display_phone_number from Meta when
+   * the caller doesn't supply one.
+   *
+   * GET https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}
+   *
+   * @param {number} businessId
+   * @param {object} accountData { phone_number_id, waba_id, access_token, display_phone_number? }
+   * @returns {Promise<WhatsappDetail>}
+   */
+  addAccount: async (businessId, { phone_number_id, waba_id, access_token, display_phone_number }) => {
+    const business = await Business.findByPk(businessId);
+    if (!business) {
+      const err = new Error(`Business not found for business_id=${businessId}`);
+      err.statusCode = 404;
+      throw err;
+    }
+
+    // Verify the credentials actually work before saving them.
+    let metaPhone;
+    try {
+      const url = `${GRAPH_API_BASE}/${phone_number_id}`;
+      const response = await axios.get(url, {
+        ...buildConfig(access_token),
+        params: { fields: 'display_phone_number,verified_name' },
+      });
+      metaPhone = response.data;
+    } catch (apiErr) {
+      const errData = apiErr?.response?.data?.error || {};
+      const err = new Error(errData.message || 'Failed to verify WhatsApp credentials with Meta');
+      err.statusCode = apiErr?.response?.status || 400;
+      err.metaError = errData;
+      throw err;
+    }
+
+    const normalizedDisplayPhone =
+      (display_phone_number || metaPhone.display_phone_number || '').replace(/\D/g, '') || null;
+
+    try {
+      const detail = await WhatsappDetail.create({
+        business_id: businessId,
+        phone_number_id,
+        waba_id,
+        access_token,
+        display_phone_number: normalizedDisplayPhone,
+      });
+      console.log(`[whatsappService.addAccount] Connected | tenant=${businessId} | phone_number_id=${phone_number_id}`);
+      return detail;
+    } catch (dbErr) {
+      if (dbErr?.name === 'SequelizeUniqueConstraintError') {
+        const err = new Error(`phone_number_id "${phone_number_id}" is already connected to a business.`);
+        err.statusCode = 409;
+        throw err;
+      }
+      throw dbErr;
+    }
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════
   //  4. SEND TEMPLATE MESSAGE
   // ══════════════════════════════════════════════════════════════════════════
 
@@ -176,9 +242,11 @@ const whatsappService = {
    * @param {string} templateName       - Approved template name in Meta Business Manager.
    * @param {string} languageCode       - Language code, default 'en_US'.
    * @param {Array}  components         - Template components array (header/body/button params).
+   * @param {number} [senderId]         - System user (agent) sending this message.
+   * @param {number} [receiverId]       - System user this message is associated with.
    * @returns {Promise<object>}         - { record, metaResponse }
    */
-  sendTemplateMessage: async (businessId, toNumber, templateName, languageCode = 'en_US', components = []) => {
+  sendTemplateMessage: async (businessId, toNumber, templateName, languageCode = 'en_US', components = [], senderId = null, receiverId = null) => {
     if (!PHONE_RE.test(toNumber)) {
       const err = new Error(`Invalid phone number format: "${toNumber}". Must be digits only with country code (e.g. 923001234567).`);
       err.statusCode = 400;
@@ -201,7 +269,7 @@ const whatsappService = {
     };
 
     // 3. Persist record as 'queued'
-    const record = await createMessageRecord(businessId, toNumber, 'template', payload);
+    const record = await createMessageRecord(businessId, toNumber, 'template', payload, senderId, receiverId);
 
     // 4. Send to Meta
     const url = `${GRAPH_API_BASE}/${detail.phone_number_id}/messages`;
@@ -238,9 +306,11 @@ const whatsappService = {
    * @param {string} toNumber    - Destination phone number (digits only).
    * @param {string} body        - Text message body.
    * @param {boolean} previewUrl - Whether WhatsApp should render link previews.
+   * @param {number} [senderId]  - System user (agent) sending this message.
+   * @param {number} [receiverId] - System user this message is associated with.
    * @returns {Promise<object>}  - { record, metaResponse }
    */
-  sendTextMessage: async (businessId, toNumber, body, previewUrl = false) => {
+  sendTextMessage: async (businessId, toNumber, body, previewUrl = false, senderId = null, receiverId = null) => {
     if (!PHONE_RE.test(toNumber)) {
       const err = new Error(`Invalid phone number format: "${toNumber}". Must be digits only with country code (e.g. 923001234567).`);
       err.statusCode = 400;
@@ -260,7 +330,7 @@ const whatsappService = {
       },
     };
 
-    const record = await createMessageRecord(businessId, toNumber, 'text', payload);
+    const record = await createMessageRecord(businessId, toNumber, 'text', payload, senderId, receiverId);
 
     const url = `${GRAPH_API_BASE}/${detail.phone_number_id}/messages`;
     try {
@@ -298,9 +368,11 @@ const whatsappService = {
    * @param {string} mediaUrl    - Publicly accessible URL of the media file.
    * @param {string} [caption]   - Optional caption (supported for image & document).
    * @param {string} [filename]  - Optional filename (used for document type).
+   * @param {number} [senderId]  - System user (agent) sending this message.
+   * @param {number} [receiverId] - System user this message is associated with.
    * @returns {Promise<object>}  - { record, metaResponse }
    */
-  sendMediaMessage: async (businessId, toNumber, mediaType, mediaUrl, caption = '', filename = '') => {
+  sendMediaMessage: async (businessId, toNumber, mediaType, mediaUrl, caption = '', filename = '', senderId = null, receiverId = null) => {
     const VALID_TYPES = ['image', 'document', 'audio', 'video'];
     if (!VALID_TYPES.includes(mediaType)) {
       const err = new Error(`Invalid media type "${mediaType}". Must be one of: ${VALID_TYPES.join(', ')}.`);
@@ -329,7 +401,7 @@ const whatsappService = {
       [mediaType]: mediaObject,
     };
 
-    const record = await createMessageRecord(businessId, toNumber, mediaType, payload);
+    const record = await createMessageRecord(businessId, toNumber, mediaType, payload, senderId, receiverId);
 
     const url = `${GRAPH_API_BASE}/${detail.phone_number_id}/messages`;
     try {
@@ -417,7 +489,7 @@ const whatsappService = {
         try {
           whatsappDetail = await WhatsappDetail.findOne({
             where: { phone_number_id: phoneNumberId, is_active: true },
-            include: [{ model: Business, as: 'business', attributes: ['id', 'name'] }],
+            include: [{ model: Business, as: 'business', attributes: ['id', 'name', 'created_by'] }],
           });
         } catch (dbErr) {
           result.errors.push({ phoneNumberId, error: dbErr.message });
@@ -487,6 +559,7 @@ const whatsappService = {
         wamid:        message.id,
         payload:      message,
         status:       'delivered', // inbound messages are already delivered
+        receiver_id:  whatsappDetail?.business?.created_by || null,
       });
     } catch (dbErr) {
       // wamid unique constraint may fire on duplicate delivery — safe to ignore

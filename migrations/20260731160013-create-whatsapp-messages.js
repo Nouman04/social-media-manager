@@ -20,6 +20,25 @@ module.exports = {
         comment: 'Which conversation this message belongs to',
       },
 
+      
+      // ── Internal user linkage ────────────────────────────────────────────
+      sender_id: {
+        type: Sequelize.INTEGER,
+        allowNull: true,
+        references: { model: 'users', key: 'id' },
+        onUpdate: 'CASCADE',
+        onDelete: 'SET NULL',
+        comment: 'System user who sent this message (outbound) — null for inbound messages',
+      },
+      receiver_id: {
+        type: Sequelize.INTEGER,
+        allowNull: true,
+        references: { model: 'users', key: 'id' },
+        onUpdate: 'CASCADE',
+        onDelete: 'SET NULL',
+        comment: 'System user this message is addressed to (inbound) — null for outbound messages',
+      },
+
       // ── Parties ──────────────────────────────────────────────────────────
       direction: {
         type: Sequelize.ENUM('outbound', 'inbound'),
@@ -36,6 +55,7 @@ module.exports = {
         allowNull: true,
         comment: 'Sender phone number (inbound)',
       },
+
 
       // ── Message type & content ────────────────────────────────────────────
       message_type: {
