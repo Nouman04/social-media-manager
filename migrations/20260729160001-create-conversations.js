@@ -19,10 +19,15 @@ module.exports = {
       type: {
         type: Sequelize.ENUM('group', 'private'),
         allowNull: false,
+        comment: 'Chat shape: group vs one-to-one',
       },
-      platform: {
-        type: Sequelize.ENUM('instagram', 'tiktok', 'whatsapp', 'messenger'),
+      social_platform_id: {
+        type: Sequelize.INTEGER,
         allowNull: false,
+        references: { model: 'social_platforms', key: 'id' },
+        onUpdate: 'CASCADE',
+        onDelete: 'RESTRICT',
+        comment: 'Which social platform this conversation came from',
       },
       is_continued: {
         type: Sequelize.BOOLEAN,
@@ -50,6 +55,11 @@ module.exports = {
 
     await queryInterface.addIndex('conversations', ['business_id'], {
       name: 'idx_conversations_business',
+    });
+
+    // Inbox lookups always scope by business + platform.
+    await queryInterface.addIndex('conversations', ['business_id', 'social_platform_id'], {
+      name: 'idx_conversations_business_platform',
     });
   },
 

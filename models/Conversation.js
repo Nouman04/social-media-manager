@@ -20,10 +20,15 @@ module.exports = (sequelize, DataTypes) => {
     type: {
       type: DataTypes.ENUM('group', 'private'),
       allowNull: false,
+      comment: 'Chat shape: group vs one-to-one',
     },
-    platform: {
-      type: DataTypes.ENUM('instagram', 'tiktok', 'whatsapp', 'messenger'),
+    social_platform_id: {
+      type: DataTypes.INTEGER,
       allowNull: false,
+      references: { model: 'social_platforms', key: 'id' },
+      onUpdate: 'CASCADE',
+      onDelete: 'RESTRICT',
+      comment: 'Which social platform this conversation came from',
     },
     is_continued: {
       type: DataTypes.BOOLEAN,
@@ -62,6 +67,12 @@ module.exports = (sequelize, DataTypes) => {
     }
     if (models.ConversationParticipant) {
       Conversation.hasMany(models.ConversationParticipant, { foreignKey: 'conversation_id', as: 'participantLinks' });
+    }
+    if (models.SocialPlatform) {
+      Conversation.belongsTo(models.SocialPlatform, { foreignKey: 'social_platform_id', as: 'socialPlatform' });
+    }
+    if (models.WhatsappMessage) {
+      Conversation.hasMany(models.WhatsappMessage, { foreignKey: 'conversation_id', as: 'whatsappMessages' });
     }
   };
 

@@ -3,7 +3,7 @@
 const express = require('express');
 const router = express.Router();
 const whatsappController = require('../controllers/whatsappController');
-const passport = require('passport');
+const authenticate = require('../middleware/authenticate');
 const multer = require('multer');
 const upload = multer({ limits: { fileSize: 100 * 1024 * 1024 } }); // Limit at 100MB per specs
 
@@ -26,12 +26,8 @@ router.post('/webhook', whatsappController.handleWebhook);
 
 // ─── JWT Auth Middleware ───────────────────────────────────────────────────────
 // Applied only to the routes defined AFTER this block.
-router.use((req, res, next) => {
-  passport.authenticate('jwt', { session: false }, (err, user, info) => {
-    req.user = user;
-    next();
-  })(req, res, next);
-});
+// Unauthenticated / invalid-token requests are rejected with 401 here.
+router.use(authenticate);
 
 // ─── PROTECTED ROUTES (require valid JWT) ────────────────────────────────────
 

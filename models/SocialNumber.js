@@ -51,6 +51,17 @@ module.exports = (sequelize, DataTypes) => {
     if (models.BusinessSocialNumber) {
       SocialNumber.hasOne(models.BusinessSocialNumber, { foreignKey: 'social_number_id', as: 'businessSocialLink' });
     }
+    if (models.SocialPlatform) {
+      SocialNumber.belongsToMany(models.SocialPlatform, {
+        through: models.SocialPlatformNumber || 'social_platform_numbers',
+        foreignKey: 'social_number_id',
+        otherKey: 'social_platform_id',
+        as: 'socialPlatforms',
+      });
+    }
+    if (models.SocialPlatformNumber) {
+      SocialNumber.hasMany(models.SocialPlatformNumber, { foreignKey: 'social_number_id', as: 'platformLinks' });
+    }
   };
 
   return SocialNumber;
