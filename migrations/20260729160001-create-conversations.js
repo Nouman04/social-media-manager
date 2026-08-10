@@ -29,6 +29,18 @@ module.exports = {
         onDelete: 'RESTRICT',
         comment: 'Which social platform this conversation came from',
       },
+      contact_identifier: {
+        type: Sequelize.STRING(128),
+        allowNull: true,
+        comment: 'External contact this thread is with, as the platform identifies them '
+               + '(WhatsApp: phone number; Instagram/Messenger: scoped user id). '
+               + 'Null for internal/group threads with no single external party.',
+      },
+      contact_name: {
+        type: Sequelize.STRING(255),
+        allowNull: true,
+        comment: 'Display name/username of the external contact, when the platform provides it',
+      },
       is_continued: {
         type: Sequelize.BOOLEAN,
         allowNull: false,
@@ -61,6 +73,14 @@ module.exports = {
     await queryInterface.addIndex('conversations', ['business_id', 'social_platform_id'], {
       name: 'idx_conversations_business_platform',
     });
+
+    // One thread per (business, platform, external contact) — this is the
+    // lookup inbound webhooks use to route a message to its conversation.
+    await queryInterface.addIndex(
+      'conversations',
+      ['business_id', 'social_platform_id', 'contact_identifier'],
+      { name: 'idx_conversations_contact', unique: true }
+    );
   },
 
   down: async (queryInterface, Sequelize) => {

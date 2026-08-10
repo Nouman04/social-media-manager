@@ -10,6 +10,7 @@ const twoFactorAuthRoutes = require("./src/routes/twoFactorAuthRoutes");
 const rbacRoutes = require("./src/routes/rbacRoutes");
 const businessRoutes = require("./src/routes/businessRoutes");
 const whatsappRoutes = require("./src/routes/whatsappRoutes");
+const instagramRoutes = require("./src/routes/instagramRoutes");
 
 const app = express();
 const PORT = process.env.NODE_PORT || process.env.PORT || 5000;
@@ -28,6 +29,7 @@ app.use("/auth", twoFactorAuthRoutes);
 app.use("/rbac", rbacRoutes);
 app.use("/business", businessRoutes);
 app.use("/api/v1/whatsapp", whatsappRoutes);
+app.use("/api/v1/instagram", instagramRoutes);
 
 app.get("/", (req, res) => {
   res.json({ success: true, message: "SMM API Server Running" });
