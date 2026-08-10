@@ -1,0 +1,249 @@
+========================================================
+FACEBOOK MESSENGER API DOCUMENTATION (Roman Urdu)
+File: src/routes/messengerRoutes.js
+Base URL: /api/v1/messenger
+========================================================
+
+Ye file Facebook Messenger ke saare routes ko define karti hai.
+Neeche har ek API ka purpose aur usage aasan Roman Urdu mein likha gya hai.
+
+ZAROORI BAATEN (Messenger ka tareeqa):
+- Messenger ek Facebook PAGE ke through kaam karta hai. Vendor apna
+  Page connect karta hai aur us Page ka "Page Access Token" deta hai.
+- Customer ko "PSID" (Page-Scoped ID) se pehchana jata hai — ye ek
+  numeric ID hai jo Meta har customer ke liye har Page par alag deta
+  hai. Ye phone number nahi hota.
+- 24-HOUR WINDOW: Jab customer aapko message karta hai to 24 ghante
+  ka window khulta hai, us dauran aap free message bhej sakte hain.
+- 24 ghante ke baad message bhejne ke liye "messaging_type" ko
+  MESSAGE_TAG karna parta hai aur saath mein ek valid "message_tag"
+  (jaise HUMAN_AGENT) dena parta hai. Warna Meta error dega.
+- Har message bhejte waqt Meta "messaging_type" mangta hai. Options:
+      RESPONSE     -> customer ke message ka jawab (normal, default)
+      UPDATE       -> koi update bhejna
+      MESSAGE_TAG  -> 24 ghante ke bahar (tag zaroori hai)
+
+--------------------------------------------------------
+1) PUBLIC ROUTES (Bina JWT Auth ke)
+--------------------------------------------------------
+Ye routes bina kisi login/token ke access hote hain, kyunke inko Meta
+ke servers khud call karte hain, aur Meta apne requests mein auth
+header nahi bhejta. Isliye ye JWT middleware se PEHLE define kiye
+gaye hain.
+
+1.1) GET /api/v1/messenger/webhook
+Purpose: Ye webhook verification ka endpoint hai. Jab hum Meta
+Developer Console mein apna Messenger webhook URL set/save karte
+hain, to Meta is URL par ek GET request bhejta hai jismein
+"hub.mode", "hub.verify_token" aur "hub.challenge" hote hain. Ye API
+check karti hai ke verify_token match ho raha hai ya nahi. Agar match
+ho jaye to "hub.challenge" wapis echo (return) kar deti hai, jis se
+Meta ko pata chal jata hai ke ye webhook genuine hai.
+Token .env se aata hai: MESSENGER_VERIFY_TOKEN (agar ye set na ho to
+WHATSAPP_VERIFY_TOKEN use hota hai).
+Controller: messengerController.verifyWebhook
+
+1.2) POST /api/v1/messenger/webhook
+Purpose: Ye main webhook hai jahan Meta real-time events bhejta hai —
+naye incoming messages, postbacks (jab customer kisi button par click
+kare), quick reply ke jawab, aur read/delivery receipts.
+Jese hi request aati hai, ye API turant 200 OK bhej deti hai (agar
+200 na bheja jaye to Meta baar baar retry karta hai aur akhir mein
+webhook band kar deta hai) aur processing background mein hoti hai.
+Ye API khud-b-khud sahi tenant (business) dhoondti hai — Meta ke
+payload mein jo Page ID aati hai, us se match karke. Agar koi
+unknown Page ki request aa jaye to wo safely skip ho jati hai
+(system crash nahi hota).
+Agar Meta same message dobara bhej de to duplicate save nahi hota
+(mid unique hai) — ye messages aur postbacks dono par lagoo hai.
+Controller: messengerController.handleWebhook
+
+--------------------------------------------------------
+2) JWT AUTH MIDDLEWARE
+--------------------------------------------------------
+Is line ke baad wale saare routes protected hain, matlab in APIs ko
+call karne ke liye valid JWT token (login token) zaroori hai. Agar
+token na ho ya ghalat ho, to API 401 Unauthorized return karti hai
+aur request aage nahi jati.
+Middleware file: src/middleware/authenticate.js
+
+--------------------------------------------------------
+3) ACCOUNT MANAGEMENT (Facebook Page Jorna)
+--------------------------------------------------------
+
+3.1) GET /api/v1/messenger/verify-credentials
+Query Params: page_id, access_token
+Purpose: Ye API check karti hai ke jo Page credentials user ne diye
+hain (page_id aur access_token) wo Meta ke Graph API ke against valid
+hain ya nahi. Page connect karne se PEHLE test karne ke liye. Isse
+Page ka naam, category, followers count waghera bhi mil jata hai.
+Controller: messengerController.verifyCredentials
+
+3.2) POST /api/v1/messenger/account
+Body: { business_id, page_id, access_token }
+Purpose: Ye API vendor ko apna Facebook Page system ke saath
+connect/add karne deti hai. Ye pehle credentials ko Meta se verify
+karti hai — agar valid hoon to hi database mein save karti hai, warna
+ghalat credentials save nahi hongi. Page ka naam khud-b-khud Meta se
+fetch ho jata hai.
+Ek page_id sirf ek hi business se connect ho sakta hai (duplicate par
+409 error milega).
+Controller: messengerController.addAccount
+
+3.3) GET /api/v1/messenger/account
+Query Params: business_id
+Purpose: Business ka connected Facebook Page dekhne ke liye (page
+name, page_id, status waghera). Security ke liye access_token
+response mein NAHI bheja jata.
+Controller: messengerController.getAccount
+
+3.4) PUT /api/v1/messenger/account
+Body: { business_id, access_token (optional), is_active (optional) }
+Purpose: Connected Page ko update karne ke liye. Sab se zaroori kaam
+iska ye hai ke access_token change (rotate) kiya ja sake, kyunke Meta
+ke tokens kuch waqt baad expire ho jate hain — agar token update
+karne ka tareeqa na ho to vendor ka Page hamesha ke liye band ho
+jayega. Naya token pehle Meta se verify hota hai, phir save hota hai.
+Controller: messengerController.updateAccount
+
+3.5) DELETE /api/v1/messenger/account
+Query Params: business_id
+Purpose: Facebook Page ko system se disconnect karne ke liye. Ye soft
+delete hai — yani purani messages/conversations delete nahi hoti,
+sirf Page ka link hat jata hai.
+Controller: messengerController.deleteAccount
+
+--------------------------------------------------------
+4) PROFILE (Profile Ki Maloomat)
+--------------------------------------------------------
+
+4.1) GET /api/v1/messenger/profile
+Query Params: business_id
+Purpose: Apne connected Facebook Page ki profile Meta se fetch karne
+ke liye — jaise name, username, about, category, link, picture, aur
+followers/fan count.
+Controller: messengerController.getProfile
+
+4.2) GET /api/v1/messenger/contact-profile
+Query Params: business_id, psid
+Purpose: Kisi customer (jis ne aapko message kiya hai) ki profile
+dekhne ke liye — first name, last name, profile picture, locale
+waghera. Ye is liye zaroori hai ke inbox mein sirf numeric PSID ki
+jagah customer ka naam aur photo dikhayi ja sake.
+Controller: messengerController.getContactProfile
+
+--------------------------------------------------------
+5) OUTBOUND MESSAGING (Messages Bhejne Wali APIs)
+--------------------------------------------------------
+
+5.1) POST /api/v1/messenger/send/text
+Body: { business_id, to, text, messaging_type (optional, default
+"RESPONSE"), message_tag (optional), receiver_id (optional) }
+Purpose: Customer ko simple text message bhejne ke liye. "to" mein
+customer ka PSID aata hai.
+YAAD RAHE: 24-hour window ke andar RESPONSE se message chala jayega.
+Window band ho chuki ho to messaging_type = "MESSAGE_TAG" aur
+message_tag = "HUMAN_AGENT" (ya koi aur valid tag) dena zaroori hai,
+warna API 400 error degi.
+Message bhejne wala user (jo login hai) khud-b-khud sender_id mein
+save ho jata hai.
+Controller: messengerController.sendText
+
+5.2) POST /api/v1/messenger/send/media
+Body: { business_id, to, media_type, media_url, messaging_type
+(optional), message_tag (optional), receiver_id (optional) }
+media_type: image | video | audio | file
+Purpose: Customer ko image, video, audio ya koi file bhejne ke liye.
+Media ek public URL ke zariye bheji jati hai (aisa link jo internet
+par khula ho, taake Meta usay download kar sake).
+Controller: messengerController.sendMedia
+
+5.3) POST /api/v1/messenger/send/quick-replies
+Body: { business_id, to, text, quick_replies: [{ title, payload }],
+messaging_type (optional), message_tag (optional) }
+Purpose: Customer ko text ke saath tappable buttons (quick replies)
+bhejne ke liye — jaise "Yes" / "No" / "Talk to agent". Jab customer
+kisi button par click karta hai to uska "payload" webhook par wapis
+aa jata hai.
+Meta ke rules: zyada se zyada 13 quick replies bheji ja sakti hain,
+aur har ek mein "title" aur "payload" dono hona zaroori hai — warna
+API 400 error degi.
+Controller: messengerController.sendQuickReplies
+
+5.4) POST /api/v1/messenger/sender-action
+Body: { business_id, to, sender_action }
+sender_action: mark_seen | typing_on | typing_off
+Purpose: Customer ki chat mein UI signals bhejne ke liye:
+   mark_seen  -> customer ko blue tick dikhana (message parh liya)
+   typing_on  -> "typing..." dikhana (jaise agent likh raha ho)
+   typing_off -> typing indicator hatana
+Ye sirf UI signals hain, inka koi record database mein save nahi hota.
+Controller: messengerController.sendSenderAction
+
+--------------------------------------------------------
+6) INBOX (Messages Parhne Wali APIs)
+--------------------------------------------------------
+
+6.1) GET /api/v1/messenger/conversations
+Query Params: business_id, limit (optional, default 50), offset
+(optional, default 0)
+Purpose: Business ki saari Messenger conversations (chat threads) ki
+list lene ke liye — sab se nayi activity wali sab se upar. Har
+conversation ke saath uska aakhri (last) message bhi aata hai, taake
+inbox mein preview line dikhayi ja sake.
+Controller: messengerController.getConversations
+
+6.2) GET /api/v1/messenger/messages
+Query Params: business_id, conversation_id, limit (optional), offset
+(optional)
+Purpose: Kisi ek conversation ke saare messages (chat history) lene
+ke liye — purane se naye ki tarteeb mein. Ye API check karti hai ke
+wo conversation isi business ki hai ya nahi — agar kisi doosre
+business ki conversation ka ID diya jaye to 404 milega (taake ek
+vendor doosre vendor ki chat na parh sake).
+Controller: messengerController.getMessages
+
+========================================================
+DATABASE STRUCTURE (Kaam Kaise Karta Hai)
+========================================================
+
+- social_platforms: saari social platforms ki list (whatsapp,
+  instagram, tiktok, messenger).
+
+- conversations: har chat thread ka record.
+    business_id          -> kis business ki chat hai
+    social_platform_id   -> kis platform se aayi (FK)
+    contact_identifier   -> customer ki pehchan
+                            (WhatsApp = phone number,
+                             Instagram = IGSID,
+                             Messenger = PSID)
+    contact_name         -> customer ka naam
+  Ek business + ek platform + ek customer = sirf ek hi conversation
+  (unique index laga hua hai).
+
+- conversation_participants: kaunsa system user (agent) is chat mein
+  shamil hai.
+
+- messenger_messages: har Messenger message ka record.
+    conversation_id  -> kis chat ka message hai
+    direction        -> inbound (aaya) ya outbound (bheja)
+    from_psid / to_psid -> kis ne kis ko
+    sender_id        -> hamare system ka user jis ne bheja
+    receiver_id      -> hamare system ka user jis ke liye hai
+    message_type     -> text / image / video / audio / file /
+                        template / quick_reply / postback / reaction
+    messaging_type   -> RESPONSE / UPDATE / MESSAGE_TAG
+    message_tag      -> jaise HUMAN_AGENT (24h ke bahar bhejne par)
+    mid              -> Messenger ka message ID (duplicate rokne ke liye)
+    status           -> queued / sent / delivered / read / failed
+
+========================================================
+NOTE:
+- Sab "PROTECTED ROUTES" ko call karne ke liye Authorization header
+  mein valid JWT Bearer token bhejna zaroori hai:
+      Authorization: Bearer <token>
+- "PUBLIC ROUTES" (webhook wale) sirf Meta ke servers ke liye hain,
+  inko manually call karne ki zarurat nahi hoti.
+- .env mein ye variables set hone chahiye:
+      MESSENGER_VERIFY_TOKEN   (ya WHATSAPP_VERIFY_TOKEN)
+========================================================
