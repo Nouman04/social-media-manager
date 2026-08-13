@@ -1,6 +1,7 @@
 'use strict';
 
 const bcrypt = require('bcrypt');
+const { randomUUID } = require('crypto');
 
 /**
  * Seeds 5 verified users.
@@ -39,7 +40,8 @@ module.exports = {
     const rows = USERS
       .filter(u => !taken.has(u.email))
       .map(u => ({
-        business_id: null,
+        // bulkInsert bypasses model defaults, so the uuid must be supplied here.
+        uuid: randomUUID(),
         name: u.name,
         email: u.email,
         password: hashedPassword,
@@ -47,6 +49,8 @@ module.exports = {
         email_verified_at: now,
         authentication_code: null,
         code_expired_at: null,
+        authentication_token: null,
+        invitation_expired_at: null,
         created_at: now,
         updated_at: now,
         deleted_at: null,

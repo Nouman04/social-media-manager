@@ -9,6 +9,7 @@ const initializePassport = require("./src/config/passportConfig");
 const twoFactorAuthRoutes = require("./src/routes/twoFactorAuthRoutes");
 const rbacRoutes = require("./src/routes/rbacRoutes");
 const businessRoutes = require("./src/routes/businessRoutes");
+const businessUserRoutes = require("./src/routes/businessUserRoutes");
 const whatsappRoutes = require("./src/routes/whatsappRoutes");
 
 const app = express();
@@ -27,6 +28,7 @@ app.use('/public', express.static(path.join(__dirname, 'src/public')));
 app.use("/auth", twoFactorAuthRoutes);
 app.use("/rbac", rbacRoutes);
 app.use("/business", businessRoutes);
+app.use("/business-users", businessUserRoutes);
 app.use("/api/v1/whatsapp", whatsappRoutes);
 
 app.get("/", (req, res) => {

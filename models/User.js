@@ -7,15 +7,12 @@ module.exports = (sequelize, DataTypes) => {
       autoIncrement: true,
       allowNull: false,
     },
-    business_id: {
-      type: DataTypes.INTEGER,
-      allowNull: true,
-      references: {
-        model: 'businesses',
-        key: 'id'
-      },
-      onUpdate: 'CASCADE',
-      onDelete: 'SET NULL',
+    uuid: {
+      type: DataTypes.UUID,
+      allowNull: false,
+      unique: true,
+      defaultValue: DataTypes.UUIDV4,
+      comment: 'Public identifier — used in invitation links instead of the numeric id',
     },
     name: {
       type: DataTypes.STRING,
@@ -46,6 +43,16 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.DATE,
       allowNull: true,
     },
+    authentication_token: {
+      type: DataTypes.STRING(128),
+      allowNull: true,
+      comment: 'Single-use invitation token; paired with uuid in the invite link',
+    },
+    invitation_expired_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: 'When the invitation token stops working; a new link can then be requested',
+    },
   }, {
     tableName: 'users',
     timestamps: true, 
@@ -57,8 +64,17 @@ module.exports = (sequelize, DataTypes) => {
 
   User.associate = function(models) {
     if (models.Business) {
-      User.belongsTo(models.Business, { foreignKey: 'business_id', as: 'business' });
       User.hasMany(models.Business, { foreignKey: 'created_by', as: 'ownedBusinesses' });
+      User.belongsToMany(models.Business, {
+        through: models.BusinessUser || 'business_users',
+        foreignKey: 'user_id',
+        otherKey: 'business_id',
+        as: 'businesses',
+      });
+    }
+
+    if (models.BusinessUser) {
+      User.hasMany(models.BusinessUser, { foreignKey: 'user_id', as: 'businessLinks' });
     }
 
     if (models.Profile) {
