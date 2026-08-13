@@ -11,7 +11,7 @@ const passport = require('passport');
  *
  * NOTE: passport.authenticate() with a custom callback does NOT send a 401
  * on its own — the callback owns that decision. Calling next() unconditionally
- * here would let unauthenticated requests through.
+ * would let unauthenticated requests through with req.user === false.
  */
 const authenticate = (req, res, next) => {
   passport.authenticate('jwt', { session: false }, (err, user, info) => {

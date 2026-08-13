@@ -39,6 +39,55 @@ const send2FACodeEmail = async (email, code, subject = 'Your 2FA Authentication 
   }
 };
 
+/**
+ * Send a business invitation link.
+ *
+ * The link carries the invited user's uuid and a single-use token; opening it
+ * lets them set a password, which activates and verifies their account.
+ *
+ * @param {string} email        - Invitee's email address.
+ * @param {string} link         - Fully-built invitation URL.
+ * @param {string} businessName - Business they are being invited to.
+ * @param {string} inviterName  - Who sent the invitation.
+ * @param {number} expiresHours - How long the link stays valid.
+ */
+const sendInvitationEmail = async (email, link, businessName, inviterName, expiresHours = 48) => {
+  const mailOptions = {
+    from: process.env.MAIL_FROM || '"SMM Support" <no-reply@smm.com>',
+    to: email,
+    subject: `You have been invited to join ${businessName}`,
+    text: `${inviterName} invited you to join ${businessName}. `
+        + `Set your password using this link: ${link} (expires in ${expiresHours} hours).`,
+    html: `
+      <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 500px; border: 1px solid #eee; border-radius: 8px;">
+        <h2 style="color: #333;">You're invited to join ${businessName}</h2>
+        <p style="font-size: 16px; color: #555;">
+          ${inviterName} has invited you to join <strong>${businessName}</strong>.
+          Click below to set your password and activate your account.
+        </p>
+        <p style="padding: 16px 0;">
+          <a href="${link}" style="background: #4CAF50; color: #fff; padding: 12px 22px; border-radius: 6px; text-decoration: none; font-size: 16px;">Accept Invitation</a>
+        </p>
+        <p style="font-size: 13px; color: #888;">Or paste this into your browser:<br>${link}</p>
+        <p style="font-size: 14px; color: #888;">
+          This invitation expires in ${expiresHours} hours. If it expires, you can request a new one.
+        </p>
+      </div>
+    `,
+  };
+
+  try {
+    const transporter = createTransport();
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`[MailService] Invitation sent to ${email}: ${info.messageId}`);
+    return info;
+  } catch (error) {
+    console.warn(`[MailService] Could not send invitation to ${email}. Link was: ${link}`, error.message);
+    return null;
+  }
+};
+
 module.exports = {
   send2FACodeEmail,
+  sendInvitationEmail,
 };

@@ -1,6 +1,6 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const { User, Profile, Business } = require('../../models');
+const { User, Profile, Business, BusinessUser } = require('../../models');
 const { send2FACodeEmail } = require('../helpers/mailService');
 const {
   signup2FASchema,
@@ -53,10 +53,16 @@ module.exports = {
 
       if (businessName) {
         const newBusiness = await Business.create({
-          user_id: newUser.id,
+          created_by: newUser.id,
           name: businessName,
         });
-        await newUser.update({ business_id: newBusiness.id });
+        // Membership now lives on the pivot; the signing-up user is the owner.
+        await BusinessUser.create({
+          business_id: newBusiness.id,
+          user_id: newUser.id,
+          is_owner: true,
+          is_active: true,
+        });
       }
 
       if (dob) {
@@ -71,7 +77,6 @@ module.exports = {
       return res.status(201).json({
         success: true,
         message: "User registered successfully. Please verify your email with the code sent.",
-        user_id: newUser.id,
       });
     } catch (err) {
       console.error("[twoFactorAuthController.signup2FA] Error:", err);
@@ -216,16 +221,29 @@ module.exports = {
         { expiresIn: '24h' }
       );
 
+      // Memberships live on the pivot now — return every business the user is
+      // still an active member of.
+      const memberships = await BusinessUser.findAll({
+        where: { user_id: user.id, is_active: true },
+        include: [{ model: Business, as: 'business', attributes: ['id', 'name', 'is_active'] }],
+      });
+
       return res.status(200).json({
         success: true,
         message: "2FA verification successful",
         token: token,
         user: {
           id: user.id,
+          uuid: user.uuid,
           name: user.name,
           email: user.email,
           status: user.status,
-          business_id: user.business_id,
+          businesses: memberships.map((m) => ({
+            id: m.business?.id,
+            name: m.business?.name,
+            is_active: m.business?.is_active,
+            is_owner: m.is_owner,
+          })),
         },
       });
     } catch (err) {
