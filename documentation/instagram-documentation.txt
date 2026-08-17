@@ -1,0 +1,229 @@
+========================================================
+INSTAGRAM API DOCUMENTATION (Roman Urdu)
+File: src/routes/instagramRoutes.js
+Base URL: /api/v1/instagram
+========================================================
+
+Ye file Instagram Direct Messaging ke saare routes ko define karti hai.
+Neeche har ek API ka purpose aur usage aasan Roman Urdu mein likha gya hai.
+
+ZAROORI BAAT (Instagram vs WhatsApp ka farq):
+- Instagram mein WhatsApp ki tarah "templates" nahi hote. Yani aap
+  pehle se approved template nahi bhej sakte.
+- Instagram mein customer ko phone number se nahi, balke "IGSID"
+  (Instagram-Scoped ID) se pehchana jata hai. Ye ek numeric ID hoti
+  hai jo Meta har customer ke liye deta hai.
+- Aap khud se kisi customer ko pehle message NAHI kar sakte. Pehle
+  customer aapko message karega, uske baad 24 ghante tak aap usay
+  reply kar sakte hain (24-hour window rule).
+
+--------------------------------------------------------
+1) PUBLIC ROUTES (Bina JWT Auth ke)
+--------------------------------------------------------
+Ye routes bina kisi login/token ke access hote hain, kyunke inko Meta
+(Instagram) ke servers khud call karte hain, aur Meta apne requests
+mein auth header nahi bhejta. Isliye ye JWT middleware se PEHLE
+define kiye gaye hain.
+
+1.1) GET /api/v1/instagram/webhook
+Purpose: Ye webhook verification ka endpoint hai. Jab hum Meta
+Developer Console mein apna Instagram webhook URL set/save karte hain,
+to Meta is URL par ek GET request bhejta hai jismein "hub.mode",
+"hub.verify_token" aur "hub.challenge" hote hain. Ye API check karti
+hai ke verify_token match ho raha hai ya nahi. Agar match ho jaye to
+"hub.challenge" wapis echo (return) kar deti hai, jis se Meta ko pata
+chal jata hai ke ye webhook genuine hai.
+Token .env se aata hai: INSTAGRAM_VERIFY_TOKEN (agar ye set na ho to
+WHATSAPP_VERIFY_TOKEN use hota hai, kyunke aksar Meta app mein ek hi
+token dono ke liye use hota hai).
+Controller: instagramController.verifyWebhook
+
+1.2) POST /api/v1/instagram/webhook
+Purpose: Ye main webhook hai jahan Meta real-time events bhejta hai —
+jaise naye incoming Direct messages, aur read/delivery receipts
+(matlab message dekha gaya ya pohanch gaya). Jese hi request aati hai,
+ye API turant 200 OK response bhej deti hai (agar 200 na bheja jaye to
+Meta baar baar retry karta hai aur akhir mein webhook band kar deta
+hai) aur processing background mein (fire-and-forget) hoti hai.
+Ye API khud-b-khud sahi tenant (business) dhoondti hai aur message ko
+sahi conversation mein save karti hai. Agar Meta same message dobara
+bhej de to duplicate save nahi hota (mid unique hai).
+Controller: instagramController.handleWebhook
+
+--------------------------------------------------------
+2) JWT AUTH MIDDLEWARE
+--------------------------------------------------------
+Is line ke baad wale saare routes protected hain, matlab in APIs ko
+call karne ke liye valid JWT token (login token) zaroori hai. Agar
+token na ho ya ghalat ho, to API 401 Unauthorized return karti hai
+aur request aage nahi jati.
+Middleware file: src/middleware/authenticate.js
+
+--------------------------------------------------------
+3) ACCOUNT MANAGEMENT (Instagram Account Jorna)
+--------------------------------------------------------
+
+3.1) GET /api/v1/instagram/verify-credentials
+Query Params: ig_user_id, access_token
+Purpose: Ye API check karti hai ke jo Instagram credentials user ne
+diye hain (ig_user_id aur access_token) wo Meta ke Graph API ke
+against valid hain ya nahi. Account connect karne se PEHLE test karne
+ke liye use hoti hai. Isse account ka username, followers count
+waghera bhi mil jata hai.
+Controller: instagramController.verifyCredentials
+
+3.2) POST /api/v1/instagram/account
+Body: { business_id, ig_user_id, page_id, access_token }
+Purpose: Ye API vendor ko apna Instagram Professional account system
+ke saath connect/add karne deti hai. Vendor apna ig_user_id
+(Instagram Professional account ID), page_id (jis Facebook Page se
+Instagram linked hai) aur access_token bhejta hai.
+Ye API pehle in credentials ko Meta se verify karti hai — agar valid
+hoon to hi database mein save karti hai, warna ghalat credentials
+save nahi hongi. Username khud-b-khud Meta se fetch ho jata hai.
+Ek ig_user_id sirf ek hi business se connect ho sakta hai (duplicate
+par 409 error milega).
+Controller: instagramController.addAccount
+
+3.3) GET /api/v1/instagram/account
+Query Params: business_id
+Purpose: Business ka connected Instagram account dekhne ke liye
+(username, page_id, status waghera). Security ke liye access_token
+response mein NAHI bheja jata.
+Controller: instagramController.getAccount
+
+3.4) PUT /api/v1/instagram/account
+Body: { business_id, page_id (optional), access_token (optional),
+is_active (optional) }
+Purpose: Connected account ko update karne ke liye. Sab se zaroori
+kaam iska ye hai ke access_token change (rotate) kiya ja sake, kyunke
+Meta ke tokens kuch waqt baad expire ho jate hain — agar token update
+karne ka tareeqa na ho to vendor ka account hamesha ke liye band ho
+jayega. Naya token bhi pehle Meta se verify hota hai, phir save hota
+hai.
+Controller: instagramController.updateAccount
+
+3.5) DELETE /api/v1/instagram/account
+Query Params: business_id
+Purpose: Instagram account ko system se disconnect karne ke liye. Ye
+soft delete hai — yani purani messages/conversations delete nahi
+hoti, sirf account link hat jata hai.
+Controller: instagramController.deleteAccount
+
+--------------------------------------------------------
+4) PROFILE (Profile Ki Maloomat)
+--------------------------------------------------------
+
+4.1) GET /api/v1/instagram/profile
+Query Params: business_id
+Purpose: Apne connected Instagram account ki profile Meta se fetch
+karne ke liye — jaise username, name, biography, website, profile
+picture, followers count, following count, aur media (posts) count.
+Controller: instagramController.getProfile
+
+4.2) GET /api/v1/instagram/contact-profile
+Query Params: business_id, igsid
+Purpose: Kisi customer (jis ne aapko message kiya hai) ki public
+profile dekhne ke liye — uska naam, username, profile picture
+waghera. Ye is liye zaroori hai ke inbox mein sirf numeric IGSID ki
+jagah customer ka naam aur photo dikhayi ja sake.
+Controller: instagramController.getContactProfile
+
+--------------------------------------------------------
+5) OUTBOUND MESSAGING (Messages Bhejne Wali APIs)
+--------------------------------------------------------
+
+5.1) POST /api/v1/instagram/send/text
+Body: { business_id, to, text, receiver_id (optional) }
+Purpose: Customer ko simple text Direct message bhejne ke liye.
+"to" mein customer ka IGSID aata hai (numeric ID, phone number nahi).
+YAAD RAHE: ye sirf tab kaam karega jab customer ne aapko pichle 24
+ghante ke andar message kiya ho (24-hour window). Window band hone ke
+baad Meta error dega.
+Message bhejne wala user (jo login hai) khud-b-khud sender_id mein
+save ho jata hai.
+Controller: instagramController.sendText
+
+5.2) POST /api/v1/instagram/send/media
+Body: { business_id, to, media_type, media_url, receiver_id (optional) }
+media_type: image | video | audio | file
+Purpose: Customer ko image, video, audio ya koi file bhejne ke liye.
+Media ek public URL ke zariye bheji jati hai (yani aisa link jo
+internet par khula ho, taake Meta usay download kar sake).
+Controller: instagramController.sendMedia
+
+5.3) POST /api/v1/instagram/send/reaction
+Body: { business_id, to, message_id, reaction (optional, default
+"love"), unreact (optional, default false) }
+Purpose: Customer ke kisi message par reaction (jaise dil/heart)
+bhejne ke liye. Agar reaction hatana ho to "unreact": true bhej dein.
+Controller: instagramController.sendReaction
+
+5.4) POST /api/v1/instagram/mark-seen
+Body: { business_id, to }
+Purpose: Customer ko batane ke liye ke uska message parh liya gaya
+hai (blue tick dikhane ke liye).
+Controller: instagramController.markSeen
+
+--------------------------------------------------------
+6) INBOX (Messages Parhne Wali APIs)
+--------------------------------------------------------
+
+6.1) GET /api/v1/instagram/conversations
+Query Params: business_id, limit (optional, default 50), offset
+(optional, default 0)
+Purpose: Business ki saari Instagram conversations (chat threads) ki
+list lene ke liye — sab se nayi activity wali sab se upar. Har
+conversation ke saath uska aakhri (last) message bhi aata hai, taake
+inbox mein preview line dikhayi ja sake.
+Controller: instagramController.getConversations
+
+6.2) GET /api/v1/instagram/messages
+Query Params: business_id, conversation_id, limit (optional), offset
+(optional)
+Purpose: Kisi ek conversation ke saare messages (chat history) lene
+ke liye — purane se naye ki tarteeb mein. Ye API check karti hai ke
+wo conversation isi business ki hai ya nahi — agar kisi doosre
+business ki conversation ka ID diya jaye to 404 milega (taake ek
+vendor doosre vendor ki chat na parh sake).
+Controller: instagramController.getMessages
+
+========================================================
+DATABASE STRUCTURE (Kaam Kaise Karta Hai)
+========================================================
+
+- social_platforms: saari social platforms ki list (whatsapp,
+  instagram, tiktok, messenger).
+
+- conversations: har chat thread ka record.
+    business_id          -> kis business ki chat hai
+    social_platform_id   -> kis platform se aayi (FK)
+    contact_identifier   -> customer ki pehchan
+                            (WhatsApp = phone number,
+                             Instagram = IGSID)
+    contact_name         -> customer ka naam/username
+  Ek business + ek platform + ek customer = sirf ek hi conversation
+  (unique index laga hua hai).
+
+- conversation_participants: kaunsa system user (agent) is chat mein
+  shamil hai.
+
+- instagram_messages: har Instagram message ka record.
+    conversation_id  -> kis chat ka message hai
+    direction        -> inbound (aaya) ya outbound (bheja)
+    from_igsid / to_igsid -> kis ne kis ko
+    sender_id        -> hamare system ka user jis ne bheja
+    receiver_id      -> hamare system ka user jis ke liye hai
+    mid              -> Instagram ka message ID (duplicate rokne ke liye)
+    status           -> queued / sent / delivered / read / failed
+
+========================================================
+NOTE:
+- Sab "PROTECTED ROUTES" ko call karne ke liye Authorization header
+  mein valid JWT Bearer token bhejna zaroori hai:
+      Authorization: Bearer <token>
+- "PUBLIC ROUTES" (webhook wale) sirf Meta ke servers ke liye hain,
+  inko manually call karne ki zarurat nahi hoti.
+- .env mein ye variables set hone chahiye:
+      INSTAGRAM_VERIFY_TOKEN   (ya WHATSAPP_VERIFY_TOKEN)
+========================================================

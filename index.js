@@ -11,6 +11,7 @@ const rbacRoutes = require("./src/routes/rbacRoutes");
 const businessRoutes = require("./src/routes/businessRoutes");
 const businessUserRoutes = require("./src/routes/businessUserRoutes");
 const whatsappRoutes = require("./src/routes/whatsappRoutes");
+const instagramRoutes = require("./src/routes/instagramRoutes");
 
 const app = express();
 const PORT = process.env.NODE_PORT || process.env.PORT || 5000;
@@ -30,6 +31,7 @@ app.use("/rbac", rbacRoutes);
 app.use("/business", businessRoutes);
 app.use("/business-users", businessUserRoutes);
 app.use("/api/v1/whatsapp", whatsappRoutes);
+app.use("/api/v1/instagram", instagramRoutes);
 
 app.get("/", (req, res) => {
   res.json({ success: true, message: "SMM API Server Running" });

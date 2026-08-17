@@ -30,6 +30,16 @@ module.exports = (sequelize, DataTypes) => {
       onDelete: 'RESTRICT',
       comment: 'Which social platform this conversation came from',
     },
+    contact_identifier: {
+      type: DataTypes.STRING(128),
+      allowNull: true,
+      comment: 'External contact this thread is with (WhatsApp: phone; Instagram: scoped user id)',
+    },
+    contact_name: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+      comment: 'Display name/username of the external contact, when the platform provides it',
+    },
     is_continued: {
       type: DataTypes.BOOLEAN,
       allowNull: false,
@@ -73,6 +83,9 @@ module.exports = (sequelize, DataTypes) => {
     }
     if (models.WhatsappMessage) {
       Conversation.hasMany(models.WhatsappMessage, { foreignKey: 'conversation_id', as: 'whatsappMessages' });
+    }
+    if (models.InstagramMessage) {
+      Conversation.hasMany(models.InstagramMessage, { foreignKey: 'conversation_id', as: 'instagramMessages' });
     }
   };
 

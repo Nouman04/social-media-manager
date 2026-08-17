@@ -1,9 +1,11 @@
 'use strict';
 
 const axios = require('axios');
-const { WhatsappDetail, WhatsappMessage, WhatsappTemplate, Business } = require('../../models');
+const { WhatsappDetail, WhatsappMessage, WhatsappTemplate, Business, Conversation } = require('../../models');
+const { findOrCreateConversation } = require('../helpers/conversationHelper');
 
 const GRAPH_API_BASE = 'https://graph.facebook.com/v18.0';
+const PLATFORM = 'whatsapp';
 
 // ─── Valid phone-number format: digits only, no + or spaces ──────────────────
 const PHONE_RE = /^\d{7,15}$/;
@@ -39,11 +41,22 @@ const getTenantCredentials = async (businessId) => {
 
 /**
  * Persist an outbound message record and return it.
+ *
+ * Resolves (or opens) the conversation thread with this contact first, since
+ * whatsapp_messages hangs off conversations rather than the business directly.
+ *
  * Sets status = 'queued'.
  */
 const createMessageRecord = async (businessId, toNumber, messageType, payload, senderId = null, receiverId = null) => {
+  const conversation = await findOrCreateConversation({
+    businessId,
+    platformName: PLATFORM,
+    contactIdentifier: toNumber,
+    createdBy: senderId,
+  });
+
   return WhatsappMessage.create({
-    business_id: businessId,
+    conversation_id: conversation.id,
     direction: 'outbound',
     to_number: toNumber,
     message_type: messageType,
@@ -550,16 +563,28 @@ const whatsappService = {
       }
     }
 
+    const ownerId = whatsappDetail?.business?.created_by || null;
+
+    // Resolve (or open) the thread with this contact before persisting.
+    const conversation = await findOrCreateConversation({
+      businessId: tenantId,
+      platformName: PLATFORM,
+      contactIdentifier: message.from,
+      contactName: metadata?.profile?.name || null,
+      createdBy: ownerId,
+    });
+
     try {
       await WhatsappMessage.create({
-        business_id:  tenantId,
+        conversation_id: conversation.id,
         direction:    'inbound',
         from_number:  message.from,
+        to_number:    whatsappDetail?.display_phone_number || null,
         message_type: message.type,
         wamid:        message.id,
         payload:      message,
         status:       'delivered', // inbound messages are already delivered
-        receiver_id:  whatsappDetail?.business?.created_by || null,
+        receiver_id:  ownerId,
       });
     } catch (dbErr) {
       // wamid unique constraint may fire on duplicate delivery — safe to ignore
@@ -599,12 +624,24 @@ const whatsappService = {
     }
 
     try {
-      const [rowsUpdated] = await WhatsappMessage.update(updateData, {
-        where: { wamid, business_id: tenantId },
+      // wamid is globally unique; the conversation join keeps the update
+      // scoped to the tenant that actually owns the message.
+      const record = await WhatsappMessage.findOne({
+        where: { wamid },
+        include: [{ model: Conversation, as: 'conversation', attributes: ['id', 'business_id'] }],
       });
-      if (rowsUpdated === 0) {
+
+      if (!record) {
         console.warn(`[whatsappService._handleStatusUpdate] No record found for wamid=${wamid} — may not have been stored yet.`);
+        return;
       }
+
+      if (record.conversation?.business_id !== tenantId) {
+        console.warn(`[whatsappService._handleStatusUpdate] wamid=${wamid} does not belong to tenant ${tenantId} — skipped.`);
+        return;
+      }
+
+      await record.update(updateData);
     } catch (dbErr) {
       console.error(`[whatsappService._handleStatusUpdate] DB error:`, dbErr.message);
     }
