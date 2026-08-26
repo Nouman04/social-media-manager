@@ -424,32 +424,64 @@ module.exports = {
    *   - business_id  {number}                            required
    *   - to           {string}                            required — digits only with country code
    *   - media_type   {'image'|'document'|'audio'|'video'} required
-   *   - media_url    {string}                            required — publicly accessible URL
+   *   - media_url    {string}                            required unless media_id — public URL
+   *   - media_id     {string}                            required unless media_url — from POST /media
    *   - caption      {string}                            optional — image / document only
    *   - filename     {string}                            optional — document only
    *   - receiver_id  {number}                            optional — system user this message is associated with
    */
   sendMedia: async (req, res) => {
     try {
-      const { business_id, to, media_type, media_url, caption = '', filename = '', receiver_id = null } = req.body;
+      const { business_id, to, media_type, media_url, media_id, caption = '', filename = '', receiver_id = null } = req.body;
 
       const missing = [];
       if (!business_id) missing.push('business_id is required');
       if (!to)          missing.push('to is required');
       if (!media_type)  missing.push('media_type is required (image | document | audio | video)');
-      if (!media_url)   missing.push('media_url is required');
+      if (!media_url && !media_id && !req.file) missing.push('provide a file upload, media_id, or media_url');
 
       if (missing.length) {
         return res.status(400).json({ success: false, message: 'Validation failed', details: missing });
       }
 
+      // A raw file was attached: hand it to Meta first, then send by the id it
+      // returns. Meta will not accept binary content on the message endpoint.
+      let resolvedMediaId = media_id;
+      let localUrl = null;
+      if (req.file && !resolvedMediaId) {
+        const uploaded = await whatsappService.uploadMedia(
+          business_id, req.file.buffer, req.file.originalname, req.file.mimetype
+        );
+        resolvedMediaId = uploaded.id;
+
+        // Meta only hands back an id, and fetching the bytes again later needs
+        // the token — so keep a local copy now purely so the inbox can show it.
+        try {
+          const fs = require('fs');
+          const path = require('path');
+          const crypto = require('crypto');
+
+          const dir = path.join(__dirname, '../public/uploads');
+          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+          const ext = path.extname(req.file.originalname) ||
+            '.' + String(req.file.mimetype).split('/')[1];
+          const name = resolvedMediaId + '_' + crypto.randomBytes(6).toString('hex') + ext;
+          fs.writeFileSync(path.join(dir, name), req.file.buffer);
+          localUrl = '/public/uploads/' + name;
+        } catch (fsErr) {
+          console.warn('[whatsappController.sendMedia] could not cache upload locally:', fsErr.message);
+        }
+      }
+
       const { record, metaResponse } = await whatsappService.sendMediaMessage(
-        business_id, to, media_type, media_url, caption, filename, req.user?.id || null, receiver_id
+        business_id, to, media_type, media_url, caption, filename || (req.file && req.file.originalname), req.user?.id || null, receiver_id, resolvedMediaId, localUrl
       );
 
       return res.status(200).json({
         success: true,
         message: `${media_type} message sent successfully`,
+        media_id: resolvedMediaId || null,
         wamid: record.wamid,
         status: record.status,
         messageRecord: record,
@@ -463,6 +495,52 @@ module.exports = {
         ...(err.metaError  && { metaError:     err.metaError }),
         ...(err.record     && { messageRecord: err.record }),
       });
+    }
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  8b. INBOX
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/v1/whatsapp/conversations?business_id=&limit=&offset=
+   * Thread list with a last-message preview.
+   */
+  getConversations: async (req, res) => {
+    try {
+      const { business_id, limit = 50, offset = 0 } = req.query;
+      if (!business_id) {
+        return res.status(400).json({ success: false, message: 'Validation failed', details: ['business_id is required'] });
+      }
+      const data = await whatsappService.getConversations(business_id, { limit, offset });
+      return res.status(200).json({ success: true, ...data });
+    } catch (err) {
+      console.error('[whatsappController.getConversations] Error:', err.message);
+      return res.status(err.statusCode || 500).json({ success: false, message: err.message });
+    }
+  },
+
+  /**
+   * GET /api/v1/whatsapp/messages?business_id=&conversation_id=|contact=&limit=&offset=
+   * One thread's history. `contact` lets the UI open a chat for a number that
+   * has no conversation yet.
+   */
+  getMessages: async (req, res) => {
+    try {
+      const { business_id, conversation_id, contact, limit = 100, offset = 0 } = req.query;
+      if (!business_id) {
+        return res.status(400).json({ success: false, message: 'Validation failed', details: ['business_id is required'] });
+      }
+      const data = await whatsappService.getMessages(business_id, {
+        conversationId: conversation_id || null,
+        contact: contact || null,
+        limit,
+        offset,
+      });
+      return res.status(200).json({ success: true, ...data });
+    } catch (err) {
+      console.error('[whatsappController.getMessages] Error:', err.message);
+      return res.status(err.statusCode || 500).json({ success: false, message: err.message });
     }
   },
 

@@ -1,0 +1,306 @@
+========================================================
+FACEBOOK LOGIN / EMBEDDED SIGNUP (Roman Urdu)
+WhatsApp Business Account ko system se connect karne ka
+poora process
+========================================================
+
+Files jo is process mein use hoti hain:
+  - src/public/whatsapp-connect.html          (Connect page / UI)
+  - src/routes/whatsappRoutes.js              (Routes)
+  - src/controllers/whatsappOnboardingController.js
+  - src/services/whatsappOnboardingService.js (Saara Meta ka kaam)
+
+Page ka URL:
+  http://localhost:5000/api/v1/whatsapp/connect
+
+
+--------------------------------------------------------
+PEHLE SAMAJHNE WALI BAAT — Ye kyun banaya?
+--------------------------------------------------------
+Pehle jab koi vendor apna WhatsApp account jorna chahta tha, to usay
+KHUD ye teen cheezein dhoond kar deni parti thi:
+      phone_number_id, waba_id, access_token
+
+Ye Meta Developer Dashboard se manually nikalni parti thi. Ek normal
+business owner ye kabhi nahi kar sakta. Aur us dashboard wala token
+sirf 24 ghante chalta hai — agle din phir band.
+
+Isi liye ab hum "EMBEDDED SIGNUP" use kar rahe hain. Ismein vendor
+sirf ek button dabata hai, Facebook ki window khulti hai, wo apne
+Facebook account se login karta hai — aur baqi sab kaam SYSTEM khud
+kar leta hai. Vendor ko koi ID ya token copy paste nahi karni parti.
+Aur jo token milta hai wo LONG-LIVED hota hai (roz roz expire nahi
+hota).
+
+
+--------------------------------------------------------
+POORA PROCESS — STEP BY STEP
+--------------------------------------------------------
+
+=== STEP 1: Vendor apne account se login karta hai ===
+
+Page khulne par pehle hamare SYSTEM ka login aata hai (email +
+password).
+
+Kyun? Kyunke system ko ye pata hona chahiye ke:
+   "Ye WhatsApp account KIS BUSINESS ke saath jorna hai, aur kya ye
+    banda us business ka member hai bhi ya nahi?"
+
+Facebook login sirf ye batata hai ke "WhatsApp account kis ka hai" —
+ye nahi batata ke hamare system mein wo kis business ka hai. Isi liye
+dono login chahiye.
+
+API: POST /auth/login
+Body: { email, password }
+Ye password check karta hai aur email par 6-digit code bhejta hai.
+
+NOTE: Asal product mein vendor pehle se hi aapke dashboard mein logged
+in hota hai, to usay dobara login nahi karna parta — sirf Facebook
+wali window khulti hai. Ye login form abhi testing ke liye hai.
+
+
+=== STEP 2: 2FA code verify karna ===
+
+Vendor email par aya hua 6-digit code daalta hai.
+
+API: POST /auth/verify-2fa
+Body: { email, code }
+
+Iske badle mein milta hai:
+   - token (JWT)  -> aage ki tamam API calls ke liye
+   - user ki details
+   - businesses ki list -> jin businesses ka ye banda member hai
+
+Yahi list step 3 ke dropdown mein dikhayi jati hai. Isi liye koi
+vendor kisi DOOSRE business ke saath WhatsApp nahi jor sakta.
+
+
+=== STEP 3: Business select karna ===
+
+Ab page par ek dropdown aata hai jismein sirf USI vendor ke businesses
+hote hain (owner wale ke saath "(owner)" likha hota hai).
+
+Saath hi system check karta hai ke is business ka WhatsApp pehle se
+juda hua hai ya nahi:
+
+API: GET /api/v1/whatsapp/health?business_id=...
+
+Agar pehle se juda hua ho to uski details dikh jati hain (phone number
+ID, quality rating, limit tier) aur button par likha aata hai
+"Reconnect with Facebook" — matlab dobara login karne se sirf token
+refresh ho jayega.
+
+
+=== STEP 4: "Continue with Facebook" button dabana ===
+
+Jab vendor button dabata hai to ek POPUP window khulti hai jo seedha
+Meta ke OAuth dialog par jati hai.
+
+ZAROORI BAAT: Hum Facebook ki JavaScript SDK (FB.login) use NAHI kar
+rahe. Kyun nahi?
+   Kyunke kuch browsers mein SDK "FedCM" ka raasta le leti thi, aur us
+   raaste mein hamara config_id chup chaap gayab ho jata tha. Uska
+   natija ye hota tha ke normal Facebook login khul jata tha, WhatsApp
+   wala setup nahi. Isi liye ab hum URL KHUD banate hain, taake saare
+   parameters guaranteed pohanchein.
+
+URL kuch is tarah banta hai:
+   https://www.facebook.com/v21.0/dialog/oauth
+      ?client_id=<META_APP_ID>
+      &config_id=<META_CONFIG_ID>
+      &response_type=code
+      &override_default_response_type=true
+      &redirect_uri=<hamare page ka URL>
+      &extras={"setup":{},"featureType":"","sessionInfoVersion":"3"}
+
+Is window mein vendor:
+   - apne Facebook account se login karta hai
+   - apna WhatsApp Business Account (WABA) select karta ya banata hai
+   - apna phone number select karta ya add karta hai
+
+
+=== STEP 5: Facebook wapis "code" bhejta hai ===
+
+Jab vendor Facebook wali window mein sab complete kar leta hai, to
+Meta us popup ko wapis hamare page par bhej deta hai, aur URL ke saath
+ek "code" laga hota hai:
+
+   .../api/v1/whatsapp/connect?code=AQBxyz123...
+
+Ab hamara page bohot chalaki se kaam karta hai:
+   - Page check karta hai: "kya main popup ke andar hoon aur mere paas
+     code aya hai?"
+   - Agar haan, to wo code apni PARENT window (asli page) ko bhej deta
+     hai (postMessage se) aur khud band ho jata hai.
+   - Asli page wo code pakar leta hai aur aage bhej deta hai.
+
+Ye "code" ek temporary parchi ki tarah hai — sirf ek dafa aur thori
+der ke liye chalti hai.
+
+
+=== STEP 6: Code server ko bhejna ===
+
+Asli page ab hamare server ko call karta hai:
+
+API: POST /api/v1/whatsapp/embedded-signup
+Headers: Authorization: Bearer <JWT token>
+Body: {
+   business_id,      -> kis business ke liye
+   code,             -> Facebook se mila hua code
+   redirect_uri      -> wahi URL jo dialog mein use hua tha
+}
+
+Server pehle ye check karta hai ke ye banda waqai us business ka
+active member hai ya nahi. Agar nahi to 403 error milta hai.
+
+
+=== STEP 7: Server ka asal kaam (5 kaam ek saath) ===
+
+Ab server Meta ke saath ye paanch kaam karta hai:
+
+  (1) CODE ko TOKEN mein badalna
+      GET https://graph.facebook.com/v21.0/oauth/access_token
+      Yahan client_id, client_secret, code AUR redirect_uri
+      bhejte hain.
+      redirect_uri bhejna ZAROORI hai — Meta check karta hai ke jo URL
+      dialog mein tha wahi yahan bhi ho. Agar na bhejein to error
+      aata hai: "Error validating verification code" (subcode 36008).
+      Jo token milta hai wo LONG-LIVED hota hai.
+
+  (2) WABA aur PHONE NUMBER maloom karna
+      Normally browser hi ye dono IDs bata deta hai, lekin kabhi kabhi
+      browser ye message miss kar deta hai. Isi liye server khud bhi
+      pata laga leta hai:
+         GET /debug_token  -> ismein "granular_scopes" ke andar WABA
+                              ID mil jati hai
+         GET /{waba_id}/phone_numbers -> phone_number_id mil jata hai
+      Matlab: agar browser fail bhi ho jaye, process phir bhi chalta
+      rahega.
+
+  (3) APNI APP ko us WABA par SUBSCRIBE karna
+      POST /{waba_id}/subscribed_apps
+      YE SAB SE ZAROORI STEP HAI. Agar ye na kiya jaye to webhook
+      verify to ho jata hai magar Meta kabhi bhi koi incoming message
+      nahi bhejta. (Pehle hamare saath yahi masla hua tha.)
+
+  (4) PHONE NUMBER ko register karna
+      POST /{phone_number_id}/register
+      Isse number Cloud API ke liye chaalu ho jata hai. Agar number
+      pehle se registered ho to system usay error na samajh kar aage
+      barh jata hai (dobara chalane par masla nahi hota).
+
+  (5) Number ki details wapis lena
+      GET /{phone_number_id}?fields=display_phone_number,verified_name
+      Taake vendor ko uska number screen par dikhaya ja sake.
+
+
+=== STEP 8: Database mein save karna ===
+
+Ab ye sab kuch "whatsapp_details" table mein save ho jata hai:
+
+   business_id           -> kis business ka hai
+   phone_number_id       -> Meta ka phone number ID
+   waba_id               -> WhatsApp Business Account ID
+   access_token          -> long-lived token
+   display_phone_number  -> dikhane wala number
+   is_active             -> true
+
+Agar wahi business dobara connect kare to purana record UPDATE ho jata
+hai (naya duplicate nahi banta) — yani token refresh ho jata hai.
+Aur agar koi doosra business wahi number jorne ki koshish kare to
+system mana kar deta hai (409 error).
+
+
+=== STEP 9: Screen par result dikhana ===
+
+Aakhir mein vendor ko uski details dikh jati hain:
+   WhatsApp number, Verified name, Phone number ID, WABA ID, Status
+
+Aur ab wo business messages bhej aur receive kar sakta hai.
+
+
+--------------------------------------------------------
+META DASHBOARD MEIN JO SETTINGS ZAROORI HAIN
+--------------------------------------------------------
+
+1) .env file mein:
+      META_APP_ID=<app id>
+      META_APP_SECRET=<app secret>
+      META_CONFIG_ID=<Facebook Login for Business ka configuration id>
+      META_GRAPH_VERSION=v21.0
+
+2) Meta App -> Settings -> Basic:
+      App Domains mein apna domain daalein
+
+3) Meta App -> Facebook Login for Business -> Settings:
+      "Valid OAuth Redirect URIs" mein ye daalein:
+         https://<aapka-domain>/api/v1/whatsapp/connect
+      (Origin bhi daal dein to behtar hai:
+         https://<aapka-domain>/ )
+
+      Client OAuth login   = Yes
+      Web OAuth login      = Yes
+
+4) WhatsApp -> Configuration -> Webhook:
+      Callback URL : https://<aapka-domain>/api/v1/whatsapp/webhook
+      Verify token : .env wala WHATSAPP_VERIFY_TOKEN
+      "messages" field subscribe karna na bhoolein
+
+
+--------------------------------------------------------
+JO MASLE PESH AA SAKTE HAIN (aur unka hal)
+--------------------------------------------------------
+
+1) "URL Blocked / redirect URI is not whitelisted"
+   Matlab: jo redirect_uri dialog bhej raha hai wo Meta ki settings
+   mein maujood nahi.
+   Hal: popup ka poora URL copy karein, usmein "redirect_uri=" wali
+   value dekhein, aur bilkul WAHI value Meta ki "Valid OAuth Redirect
+   URIs" list mein daal dein. (Strict Mode ON ho to ek ek character
+   match hona zaroori hai.)
+
+2) "Error validating verification code" (subcode 36008)
+   Matlab: token exchange ke waqt redirect_uri nahi bheja gaya ya
+   different tha.
+   Hal: dono jagah bilkul same redirect_uri hona chahiye. (Ab system
+   khud yahi karta hai.)
+
+3) Facebook login to ho gaya magar WhatsApp ka setup nahi khula
+   Matlab: dialog ke URL mein config_id nahi ja raha (SDK/FedCM wala
+   masla).
+   Hal: hum ab URL khud bana rahe hain, is liye ye masla khatam.
+
+4) Message bhej to sakte hain magar customer ka message nahi aa raha
+   Matlab: app us WABA par subscribe nahi hui.
+   Hal: Step 7 ka point (3) — subscribed_apps. Ab ye khud-b-khud ho
+   jata hai.
+
+5) "Meta credentials are not configured"
+   Matlab: .env mein META_APP_ID ya META_CONFIG_ID nahi hai.
+   Hal: .env mein daal kar server restart karein.
+
+
+--------------------------------------------------------
+CHOTA SA KHULASA (ek nazar mein)
+--------------------------------------------------------
+
+  Vendor login karta hai (hamara system)
+        |
+  Business select karta hai
+        |
+  "Continue with Facebook" dabata hai
+        |
+  Facebook window -> WABA + number select
+        |
+  Facebook "code" wapis bhejta hai
+        |
+  Server: code -> long-lived token
+  Server: WABA aur phone number maloom karta hai
+  Server: apni app ko WABA par subscribe karta hai
+  Server: number register karta hai
+        |
+  Sab kuch database mein save
+        |
+  Vendor ab messages bhej aur receive kar sakta hai
+
+========================================================

@@ -1,10 +1,12 @@
 require("dotenv").config();
 const express = require("express");
+const http = require("http");
 const path = require("path");
 const bodyParser = require("body-parser");
 const cors = require("cors");
 const passport = require("passport");
 const initializePassport = require("./src/config/passportConfig");
+const realtime = require("./src/helpers/realtime");
 
 const twoFactorAuthRoutes = require("./src/routes/twoFactorAuthRoutes");
 const rbacRoutes = require("./src/routes/rbacRoutes");
@@ -37,7 +39,12 @@ app.get("/", (req, res) => {
   res.json({ success: true, message: "SMM API Server Running" });
 });
 
-app.listen(PORT, () => {
+// Socket.IO needs the underlying HTTP server, so create it explicitly
+// rather than letting app.listen() build one internally.
+const server = http.createServer(app);
+realtime.init(server);
+
+server.listen(PORT, () => {
   console.log(`SMM App is listening at port: ${PORT}`);
 });
 

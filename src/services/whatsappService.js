@@ -1,8 +1,10 @@
 'use strict';
 
 const axios = require('axios');
+const { Op } = require('sequelize');
 const { WhatsappDetail, WhatsappMessage, WhatsappTemplate, Business, Conversation } = require('../../models');
-const { findOrCreateConversation } = require('../helpers/conversationHelper');
+const { findOrCreateConversation, getPlatformId } = require('../helpers/conversationHelper');
+const realtime = require('../helpers/realtime');
 
 const GRAPH_API_BASE = 'https://graph.facebook.com/v18.0';
 const PLATFORM = 'whatsapp';
@@ -72,6 +74,28 @@ const createMessageRecord = async (businessId, toNumber, messageType, payload, s
  */
 const markSent = async (record, wamid) => {
   await record.update({ wamid, status: 'sent' });
+  await emitOutbound(record);
+};
+
+/**
+ * Mirror an outbound message to every open inbox for its business.
+ * The conversation carries the business id, so it has to be looked up.
+ */
+const emitOutbound = async (record) => {
+  try {
+    const conversation = await Conversation.findByPk(record.conversation_id);
+    if (!conversation) return;
+    realtime.emitToBusiness(conversation.business_id, 'message:outbound', {
+      message: record.toJSON(),
+      conversation: {
+        id: conversation.id,
+        contact_identifier: conversation.contact_identifier,
+        contact_name: conversation.contact_name,
+      },
+    });
+  } catch (err) {
+    console.warn('[whatsappService.emitOutbound] skipped:', err.message);
+  }
 };
 
 /**
@@ -385,7 +409,7 @@ const whatsappService = {
    * @param {number} [receiverId] - System user this message is associated with.
    * @returns {Promise<object>}  - { record, metaResponse }
    */
-  sendMediaMessage: async (businessId, toNumber, mediaType, mediaUrl, caption = '', filename = '', senderId = null, receiverId = null) => {
+  sendMediaMessage: async (businessId, toNumber, mediaType, mediaUrl, caption = '', filename = '', senderId = null, receiverId = null, mediaId = null, localUrl = null) => {
     const VALID_TYPES = ['image', 'document', 'audio', 'video'];
     if (!VALID_TYPES.includes(mediaType)) {
       const err = new Error(`Invalid media type "${mediaType}". Must be one of: ${VALID_TYPES.join(', ')}.`);
@@ -401,8 +425,15 @@ const whatsappService = {
 
     const detail = await getTenantCredentials(businessId);
 
-    // Build the type-specific media object
-    const mediaObject = { link: mediaUrl };
+    if (!mediaUrl && !mediaId) {
+      const err = new Error('Either media_url or media_id is required.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    // Meta accepts either a public URL (link) or a previously uploaded media_id.
+    // Prefer the id when both are given — Meta already holds those bytes.
+    const mediaObject = mediaId ? { id: mediaId } : { link: mediaUrl };
     if (caption  && ['image', 'document'].includes(mediaType)) mediaObject.caption  = caption;
     if (filename && mediaType === 'document')                   mediaObject.filename = filename;
 
@@ -414,7 +445,15 @@ const whatsappService = {
       [mediaType]: mediaObject,
     };
 
-    const record = await createMessageRecord(businessId, toNumber, mediaType, payload, senderId, receiverId);
+    // What we store is the same payload plus a locally viewable copy of the
+    // file, so the inbox can render outbound media too. Meta never sees this
+    // extra key — it only goes in the DB record.
+    const previewUrl = localUrl || (mediaUrl || null);
+    const storedPayload = previewUrl
+      ? { ...payload, [mediaType]: { ...mediaObject, local_url: previewUrl } }
+      : payload;
+
+    const record = await createMessageRecord(businessId, toNumber, mediaType, storedPayload, senderId, receiverId);
 
     const url = `${GRAPH_API_BASE}/${detail.phone_number_id}/messages`;
     try {
@@ -520,7 +559,7 @@ const whatsappService = {
         // ── Inbound messages ───────────────────────────────────────────────
         if (Array.isArray(value.messages)) {
           for (const message of value.messages) {
-            await whatsappService._handleInboundMessage(tenantId, whatsappDetail, message, value.metadata);
+            await whatsappService._handleInboundMessage(tenantId, whatsappDetail, message, value.metadata, value.contacts);
           }
         }
 
@@ -545,7 +584,7 @@ const whatsappService = {
   /**
    * Persist an inbound message to the whatsapp_messages table.
    */
-  _handleInboundMessage: async (tenantId, whatsappDetail, message, metadata) => {
+  _handleInboundMessage: async (tenantId, whatsappDetail, message, metadata, contacts = []) => {
     console.log(
       `[WEBHOOK] Inbound | tenant=${tenantId} | from=${message.from} | type=${message.type} | msgId=${message.id}`
     );
@@ -565,17 +604,22 @@ const whatsappService = {
 
     const ownerId = whatsappDetail?.business?.created_by || null;
 
+    // Meta puts the sender's WhatsApp profile name in value.contacts[], keyed by
+    // wa_id. metadata describes OUR number, so the name is never in there.
+    const contact = Array.isArray(contacts) ? contacts.find((c) => c?.wa_id === message.from) : null;
+    const contactName = contact?.profile?.name || null;
+
     // Resolve (or open) the thread with this contact before persisting.
     const conversation = await findOrCreateConversation({
       businessId: tenantId,
       platformName: PLATFORM,
       contactIdentifier: message.from,
-      contactName: metadata?.profile?.name || null,
+      contactName,
       createdBy: ownerId,
     });
 
     try {
-      await WhatsappMessage.create({
+      const saved = await WhatsappMessage.create({
         conversation_id: conversation.id,
         direction:    'inbound',
         from_number:  message.from,
@@ -585,6 +629,16 @@ const whatsappService = {
         payload:      message,
         status:       'delivered', // inbound messages are already delivered
         receiver_id:  ownerId,
+      });
+
+      // Push it to any open inbox for this tenant.
+      realtime.emitToBusiness(tenantId, 'message:inbound', {
+        message: saved.toJSON(),
+        conversation: {
+          id: conversation.id,
+          contact_identifier: conversation.contact_identifier,
+          contact_name: conversation.contact_name || contactName || null,
+        },
       });
     } catch (dbErr) {
       // wamid unique constraint may fire on duplicate delivery — safe to ignore
@@ -642,9 +696,88 @@ const whatsappService = {
       }
 
       await record.update(updateData);
+
+      realtime.emitToBusiness(tenantId, 'message:status', {
+        id: record.id,
+        wamid: record.wamid,
+        conversation_id: record.conversation_id,
+        status: record.status,
+        error_code: record.error_code || null,
+        error_message: record.error_message || null,
+      });
     } catch (dbErr) {
       console.error(`[whatsappService._handleStatusUpdate] DB error:`, dbErr.message);
     }
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  8b. INBOX — CONVERSATIONS & MESSAGES
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * List WhatsApp conversation threads for a tenant, most recent first.
+   * Each row carries the last message so the inbox can show a preview.
+   */
+  getConversations: async (businessId, { limit = 50, offset = 0 } = {}) => {
+    const socialPlatformId = await getPlatformId(PLATFORM);
+
+    const { rows, count } = await Conversation.findAndCountAll({
+      where: { business_id: businessId, social_platform_id: socialPlatformId },
+      order: [['updated_at', 'DESC']],
+      limit: Number(limit),
+      offset: Number(offset),
+    });
+
+    const conversations = await Promise.all(rows.map(async (conv) => {
+      const last = await WhatsappMessage.findOne({
+        where: { conversation_id: conv.id },
+        order: [['created_at', 'DESC']],
+      });
+      return { ...conv.toJSON(), last_message: last ? last.toJSON() : null };
+    }));
+
+    return { total: count, limit: Number(limit), offset: Number(offset), conversations };
+  },
+
+  /**
+   * Fetch one thread's messages, oldest first.
+   *
+   * Scoped by business_id so a tenant can never read another tenant's thread.
+   * Passing a contact number instead of a conversation id is supported, so the
+   * UI can open a chat for a number typed in at runtime.
+   */
+  getMessages: async (businessId, { conversationId = null, contact = null, limit = 100, offset = 0 } = {}) => {
+    const socialPlatformId = await getPlatformId(PLATFORM);
+
+    const where = { business_id: businessId, social_platform_id: socialPlatformId };
+    if (conversationId) where.id = conversationId;
+    else if (contact) where.contact_identifier = String(contact).replace(/\D/g, '');
+    else {
+      const err = new Error('Either conversation_id or contact is required.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const conversation = await Conversation.findOne({ where });
+    if (!conversation) {
+      // A number with no history yet is not an error — the UI opens an empty chat.
+      return { conversation: null, total: 0, limit: Number(limit), offset: Number(offset), messages: [] };
+    }
+
+    const { rows, count } = await WhatsappMessage.findAndCountAll({
+      where: { conversation_id: conversation.id },
+      order: [['created_at', 'ASC']],
+      limit: Number(limit),
+      offset: Number(offset),
+    });
+
+    return {
+      conversation: conversation.toJSON(),
+      total: count,
+      limit: Number(limit),
+      offset: Number(offset),
+      messages: rows.map((m) => m.toJSON()),
+    };
   },
 
   // ══════════════════════════════════════════════════════════════════════════

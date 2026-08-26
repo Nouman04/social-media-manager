@@ -1,8 +1,10 @@
 'use strict';
 
 const express = require('express');
+const path = require('path');
 const router = express.Router();
 const whatsappController = require('../controllers/whatsappController');
+const whatsappOnboardingController = require('../controllers/whatsappOnboardingController');
 const authenticate = require('../middleware/authenticate');
 const multer = require('multer');
 const upload = multer({ limits: { fileSize: 100 * 1024 * 1024 } }); // Limit at 100MB per specs
@@ -23,6 +25,29 @@ router.get('/webhook', whatsappController.verifyWebhook);
  * Responds 200 immediately; processing is fire-and-forget.
  */
 router.post('/webhook', whatsappController.handleWebhook);
+
+/**
+ * GET /api/v1/whatsapp/embedded-signup/config
+ * Public: app id + Facebook Login config id for the connect page popup.
+ */
+router.get('/embedded-signup/config', whatsappOnboardingController.getConfig);
+
+/**
+ * GET /api/v1/whatsapp/connect
+ * Public: serves the vendor-facing Connect WhatsApp page.
+ */
+router.get('/connect', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/whatsapp-connect.html'));
+});
+
+/**
+ * GET /api/v1/whatsapp/chat
+ * Public: serves the live chat / inbox page. The page itself signs in and
+ * calls the protected APIs with a JWT.
+ */
+router.get('/chat', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/whatsapp-chat.html'));
+});
 
 // ─── JWT Auth Middleware ───────────────────────────────────────────────────────
 // Applied only to the routes defined AFTER this block.
@@ -58,6 +83,14 @@ router.post('/business-profile', whatsappController.updateProfile);
  */
 router.post('/account', whatsappController.addAccount);
 
+/**
+ * POST /api/v1/whatsapp/embedded-signup
+ * Finish Embedded Signup: exchange code, subscribe app to the WABA,
+ * register the number, and store it against the business.
+ * Body: { business_id, code, waba_id, phone_number_id, pin? }
+ */
+router.post('/embedded-signup', whatsappOnboardingController.completeSignup);
+
 // ─── OUTBOUND MESSAGING ────────────────────────────────────────────────────────
 
 /**
@@ -77,9 +110,24 @@ router.post('/send/text', whatsappController.sendText);
 /**
  * POST /api/v1/whatsapp/send/media
  * Send an image, document, audio, or video via public URL.
- * Body: { business_id, to, media_type, media_url, caption?, filename? }
+ * Accepts a raw file (multipart "file"), a media_id, or a public media_url.
+ * Body: { business_id, to, media_type, [file|media_id|media_url], caption?, filename? }
  */
-router.post('/send/media', whatsappController.sendMedia);
+router.post('/send/media', upload.single('file'), whatsappController.sendMedia);
+
+// ─── INBOX ─────────────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/v1/whatsapp/conversations?business_id=&limit=&offset=
+ * List chat threads with a last-message preview.
+ */
+router.get('/conversations', whatsappController.getConversations);
+
+/**
+ * GET /api/v1/whatsapp/messages?business_id=&conversation_id=|contact=
+ * One thread's messages. Pass `contact` to open a chat for a raw number.
+ */
+router.get('/messages', whatsappController.getMessages);
 
 // ─── TEMPLATE MANAGEMENT ───────────────────────────────────────────────────────
 
