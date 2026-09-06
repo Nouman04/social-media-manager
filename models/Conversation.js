@@ -87,6 +87,9 @@ module.exports = (sequelize, DataTypes) => {
     if (models.InstagramMessage) {
       Conversation.hasMany(models.InstagramMessage, { foreignKey: 'conversation_id', as: 'instagramMessages' });
     }
+    if (models.MessengerMessage) {
+      Conversation.hasMany(models.MessengerMessage, { foreignKey: 'conversation_id', as: 'messengerMessages' });
+    }
   };
 
   return Conversation;
