@@ -6,7 +6,12 @@ const { InstagramDetail, InstagramMessage, Conversation, Business } = require('.
 const { findOrCreateConversation, getPlatformId } = require('../helpers/conversationHelper');
 const realtime = require('../helpers/realtime');
 
-const GRAPH_API_BASE = 'https://graph.facebook.com/v18.0';
+// Instagram's native-login messaging pipeline (the one actually confirmed
+// working for this app) is served from graph.instagram.com, not
+// graph.facebook.com — a Page access token from Facebook Login is rejected
+// outright here; this expects the IGAA-prefixed token from "API setup with
+// Instagram login" instead.
+const GRAPH_API_BASE = 'https://graph.instagram.com/v21.0';
 const PLATFORM = 'instagram';
 
 // Instagram-scoped IDs are numeric strings.
@@ -100,6 +105,19 @@ const markFailed = async (record, errorCode, errorMessage) => {
 };
 
 /**
+ * Resolve the conversation-scoped id Meta's send endpoint actually requires
+ * for a contact, falling back to the webhook-scoped id (toIgsid) when it
+ * hasn't been set yet — see Conversation.ig_send_id.
+ */
+const resolveSendId = async (businessId, toIgsid) => {
+  const socialPlatformId = await getPlatformId(PLATFORM);
+  const conversation = await Conversation.findOne({
+    where: { business_id: businessId, social_platform_id: socialPlatformId, contact_identifier: toIgsid },
+  });
+  return conversation?.ig_send_id || toIgsid;
+};
+
+/**
  * Shared outbound path: resolve credentials + conversation, persist the record,
  * POST to the Graph API, then mark the record sent or failed.
  *
@@ -128,8 +146,22 @@ const dispatchMessage = async ({ businessId, toIgsid, messageType, messageBody, 
     createdBy: senderId,
   });
 
+  // POST /{ig_user_id}/messages requires a conversation-scoped recipient id
+  // that is NOT the webhook-scoped id we key conversations on — Meta rejects
+  // the latter outright ("requested user cannot be found"). Until that id is
+  // resolved and cached on the conversation, fall back to toIgsid so the
+  // error that comes back is Meta's own rather than one we invented.
+  if (!conversation.ig_send_id) {
+    console.warn(
+      `[instagramService.dispatchMessage] conversation ${conversation.id} has no ig_send_id yet — ` +
+      `sending will likely fail. Look it up via GET /{ig_user_id}/conversations?fields=participants ` +
+      'and set it with PUT /api/v1/instagram/conversations/:id (or update the row directly).'
+    );
+  }
+  const sendToId = conversation.ig_send_id || toIgsid;
+
   const payload = {
-    recipient: { id: toIgsid },
+    recipient: { id: sendToId },
     message: messageBody,
   };
 
@@ -236,13 +268,19 @@ const instagramService = {
   /**
    * Update a connected account — typically to rotate an expiring token.
    * Any new token is verified before it replaces the stored one.
+   *
+   * ig_scoped_id has no discovery endpoint — Meta only reveals it as
+   * sender/recipient.id on that account's first real inbound webhook event,
+   * so a freshly connected account won't have one until then. Once you see
+   * it in a "No active tenant for id: ..." log line, set it here.
    */
-  updateAccount: async (businessId, { page_id, access_token, is_active }) => {
+  updateAccount: async (businessId, { page_id, access_token, is_active, ig_scoped_id }) => {
     const detail = await getTenantCredentials(businessId);
 
     const updates = {};
     if (page_id !== undefined) updates.page_id = page_id;
     if (is_active !== undefined) updates.is_active = is_active;
+    if (ig_scoped_id !== undefined) updates.ig_scoped_id = ig_scoped_id;
 
     if (access_token) {
       const profile = await instagramService.verifyCredentials(detail.ig_user_id, access_token);
@@ -251,7 +289,7 @@ const instagramService = {
     }
 
     if (Object.keys(updates).length === 0) {
-      const err = new Error('No updatable fields provided (page_id, access_token, is_active).');
+      const err = new Error('No updatable fields provided (page_id, access_token, is_active, ig_scoped_id).');
       err.statusCode = 400;
       throw err;
     }
@@ -391,9 +429,10 @@ const instagramService = {
    */
   sendReaction: async (businessId, toIgsid, messageId, reaction = 'love', unreact = false) => {
     const detail = await getTenantCredentials(businessId);
+    const sendToId = await resolveSendId(businessId, toIgsid);
 
     const payload = {
-      recipient: { id: toIgsid },
+      recipient: { id: sendToId },
       sender_action: unreact ? 'unreact' : 'react',
       payload: { message_id: messageId, ...(unreact ? {} : { reaction }) },
     };
@@ -412,7 +451,8 @@ const instagramService = {
    */
   markSeen: async (businessId, toIgsid) => {
     const detail = await getTenantCredentials(businessId);
-    const payload = { recipient: { id: toIgsid }, sender_action: 'mark_seen' };
+    const sendToId = await resolveSendId(businessId, toIgsid);
+    const payload = { recipient: { id: sendToId }, sender_action: 'mark_seen' };
     const url = `${GRAPH_API_BASE}/${detail.ig_user_id}/messages`;
     try {
       const response = await axios.post(url, payload, buildConfig(detail.access_token));
@@ -483,17 +523,42 @@ const instagramService = {
     };
   },
 
+  /**
+   * Set a conversation's ig_send_id — the conversation-scoped recipient id
+   * POST /{ig_user_id}/messages actually requires. There's no API to
+   * discover it in advance; find it via GET /{ig_user_id}/conversations
+   * ?fields=participants on the connected account and match by username,
+   * then set it here once, before replying to a new contact for the first
+   * time. Scoped by business_id so one tenant cannot edit another's thread.
+   */
+  updateConversationSendId: async (businessId, conversationId, igSendId) => {
+    const socialPlatformId = await getPlatformId(PLATFORM);
+
+    const conversation = await Conversation.findOne({
+      where: { id: conversationId, business_id: businessId, social_platform_id: socialPlatformId },
+    });
+    if (!conversation) {
+      const err = new Error(`Instagram conversation ${conversationId} not found for business_id=${businessId}`);
+      err.statusCode = 404;
+      throw err;
+    }
+
+    await conversation.update({ ig_send_id: igSendId });
+    return conversation.toJSON();
+  },
+
   // ══════════════════════════════════════════════════════════════════════════
   //  8. WEBHOOK — VERIFICATION TOKEN CHECK
   // ══════════════════════════════════════════════════════════════════════════
 
   /**
    * Validate the Meta webhook verification handshake.
-   * Falls back to the shared WhatsApp verify token when no Instagram-specific
-   * one is configured, since Meta apps often reuse a single token.
+   * Checks against META_VERIFY_TOKEN — the shared verify token Instagram and
+   * Messenger both use on the /api/v1/meta/webhook endpoint — falling back to
+   * an Instagram-specific token if that's what's configured instead.
    */
   verifyWebhookToken: (mode, token, challenge) => {
-    const systemToken = process.env.INSTAGRAM_VERIFY_TOKEN || process.env.WHATSAPP_VERIFY_TOKEN;
+    const systemToken = process.env.META_VERIFY_TOKEN || process.env.INSTAGRAM_VERIFY_TOKEN;
     if (mode === 'subscribe' && token && token === systemToken) {
       return { valid: true, challenge };
     }
@@ -539,8 +604,15 @@ const instagramService = {
 
         let detail;
         try {
+          // accountId is whatever Meta's current messaging system reports on
+          // the event — that's ig_scoped_id, not ig_user_id (the classic id
+          // only matters for the send URL). Matching both keeps this working
+          // regardless of which one a given payload happens to carry.
           detail = await InstagramDetail.findOne({
-            where: { ig_user_id: String(accountId), is_active: true },
+            where: {
+              [Op.or]: [{ ig_user_id: String(accountId) }, { ig_scoped_id: String(accountId) }],
+              is_active: true,
+            },
             include: [{ model: Business, as: 'business', attributes: ['id', 'name', 'created_by'] }],
           });
         } catch (dbErr) {
@@ -549,7 +621,11 @@ const instagramService = {
         }
 
         if (!detail) {
-          console.warn(`[instagramService.processWebhookEvent] No active tenant for ig_user_id: ${accountId}`);
+          console.warn(
+            `[instagramService.processWebhookEvent] No active tenant for id: ${accountId}. ` +
+            'If this is a newly connected account, its ig_scoped_id has likely never been observed yet — ' +
+            'set InstagramDetail.ig_scoped_id to this id once you confirm which business it belongs to.'
+          );
           result.skipped++;
           continue;
         }

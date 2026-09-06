@@ -19,11 +19,23 @@ module.exports = (sequelize, DataTypes) => {
     },
 
     // ── Meta / Instagram identifiers ────────────────────────────────────────
+    // Instagram exposes two different ids for the same Professional account:
+    // ig_user_id is the classic IG Business Account ID — required as the URL
+    // prefix for POST /{id}/messages when sending. ig_scoped_id is a separate
+    // messaging-scoped id that Meta's current Instagram/Messenger system
+    // actually reports as sender.id / recipient.id on inbound webhooks — that
+    // one, not ig_user_id, is what maps an inbound event to the right tenant.
     ig_user_id: {
       type: DataTypes.STRING(64),
       allowNull: false,
       unique: true,
-      comment: 'Instagram Professional account ID — maps inbound webhooks to the right tenant',
+      comment: 'Instagram Professional account ID — used as the URL prefix when sending messages',
+    },
+    ig_scoped_id: {
+      type: DataTypes.STRING(64),
+      allowNull: true,
+      unique: true,
+      comment: 'Messaging-scoped Instagram ID — what inbound webhooks report as sender/recipient.id',
     },
     page_id: {
       type: DataTypes.STRING(64),

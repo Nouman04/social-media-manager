@@ -15,6 +15,7 @@ const businessUserRoutes = require("./src/routes/businessUserRoutes");
 const whatsappRoutes = require("./src/routes/whatsappRoutes");
 const instagramRoutes = require("./src/routes/instagramRoutes");
 const messengerRoutes = require("./src/routes/messengerRoutes");
+const metaWebhookRoutes = require("./src/routes/metaWebhookRoutes");
 
 const app = express();
 const PORT = process.env.NODE_PORT || process.env.PORT || 5000;
@@ -36,6 +37,9 @@ app.use("/business-users", businessUserRoutes);
 app.use("/api/v1/whatsapp", whatsappRoutes);
 app.use("/api/v1/instagram", instagramRoutes);
 app.use("/api/v1/messenger", messengerRoutes);
+// Shared Instagram/Messenger webhook — one Callback URL for both.
+// WhatsApp keeps its own separate webhook (see whatsappRoutes.js).
+app.use("/api/v1/meta", metaWebhookRoutes);
 
 app.get("/", (req, res) => {
   res.json({ success: true, message: "SMM API Server Running" });

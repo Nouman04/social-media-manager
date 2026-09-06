@@ -10,19 +10,10 @@ const authenticate = require('../middleware/authenticate');
 // ─── PUBLIC ROUTES (no JWT) ───────────────────────────────────────────────────
 // Meta's servers call the webhook endpoints directly — they carry no auth
 // header. These MUST be registered before the JWT middleware below.
-
-/**
- * GET /api/v1/instagram/webhook
- * Meta verification handshake — echoes hub.challenge when the token matches.
- */
-router.get('/webhook', instagramController.verifyWebhook);
-
-/**
- * POST /api/v1/instagram/webhook
- * Real-time event delivery (direct messages, read/delivery receipts).
- * Responds 200 immediately; processing is fire-and-forget.
- */
-router.post('/webhook', instagramController.handleWebhook);
+//
+// The webhook itself now lives at the shared /api/v1/meta/webhook endpoint
+// (see metaWebhookRoutes.js) rather than here — Instagram and Messenger
+// deliver to that one Callback URL. WhatsApp keeps its own separate webhook.
 
 /**
  * GET /api/v1/instagram/embedded-signup/config
@@ -151,5 +142,15 @@ router.get('/conversations', instagramController.getConversations);
  * Fetch one thread's message history.
  */
 router.get('/messages', instagramController.getMessages);
+
+/**
+ * PUT /api/v1/instagram/conversations/:id
+ * Set ig_send_id — the conversation-scoped recipient id Meta's send endpoint
+ * requires, which never appears in inbound webhooks and must be looked up
+ * via GET /{ig_user_id}/conversations?fields=participants and matched by
+ * username before replying to a new contact for the first time.
+ * Body: { business_id, ig_send_id }
+ */
+router.put('/conversations/:id', instagramController.updateConversationSendId);
 
 module.exports = router;

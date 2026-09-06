@@ -348,54 +348,7 @@ module.exports = {
     }
   },
 
-  // ══════════════════════════════════════════════════════════════════════════
-  //  6. WEBHOOKS
-  // ══════════════════════════════════════════════════════════════════════════
-
-  /**
-   * GET /api/v1/messenger/webhook
-   * Meta calls this once when the webhook URL is registered.
-   */
-  verifyWebhook: (req, res) => {
-    const mode = req.query['hub.mode'];
-    const token = req.query['hub.verify_token'];
-    const challenge = req.query['hub.challenge'];
-
-    const result = messengerService.verifyWebhookToken(mode, token, challenge);
-
-    if (result.valid) {
-      console.log('[messengerController.verifyWebhook] Webhook verified successfully.');
-      return res.status(200).send(result.challenge);
-    }
-
-    console.warn('[messengerController.verifyWebhook] Verification failed — invalid token or mode.');
-    return res.status(403).json({ success: false, message: 'Forbidden: invalid verify token or mode' });
-  },
-
-  /**
-   * POST /api/v1/messenger/webhook
-   *
-   * Meta posts Messenger messages and receipts here. Always acknowledge with
-   * 200 immediately — any non-2xx makes Meta retry and eventually disable the
-   * subscription. Processing happens after the response is flushed.
-   */
-  handleWebhook: (req, res) => {
-    res.status(200).send('EVENT_RECEIVED');
-
-    const body = req.body;
-
-    // Messenger webhooks arrive with object = "page".
-    if (body?.object !== 'page') {
-      console.warn('[messengerController.handleWebhook] Ignored non-page object:', body?.object);
-      return;
-    }
-
-    messengerService.processWebhookEvent(body)
-      .then((result) => {
-        console.log('[messengerController.handleWebhook] Processing result:', result);
-      })
-      .catch((err) => {
-        console.error('[messengerController.handleWebhook] Unhandled processing error:', err.message);
-      });
-  },
+  // Webhook verification/delivery is handled by the shared
+  // /api/v1/meta/webhook endpoint (metaWebhookController) rather than here —
+  // it calls messengerService.verifyWebhookToken / processWebhookEvent directly.
 };

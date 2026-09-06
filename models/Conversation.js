@@ -40,6 +40,11 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: true,
       comment: 'Display name/username of the external contact, when the platform provides it',
     },
+    ig_send_id: {
+      type: DataTypes.STRING(64),
+      allowNull: true,
+      comment: 'Instagram conversation-scoped recipient id required by POST /{ig_user_id}/messages — distinct from contact_identifier',
+    },
     is_continued: {
       type: DataTypes.BOOLEAN,
       allowNull: false,

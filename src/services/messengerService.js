@@ -530,11 +530,12 @@ const messengerService = {
 
   /**
    * Validate the Meta webhook verification handshake.
-   * Falls back to the shared WhatsApp verify token when no Messenger-specific
-   * one is configured, since Meta apps often reuse a single token.
+   * Checks against META_VERIFY_TOKEN — the shared verify token Instagram and
+   * Messenger both use on the /api/v1/meta/webhook endpoint — falling back to
+   * a Messenger-specific token if that's what's configured instead.
    */
   verifyWebhookToken: (mode, token, challenge) => {
-    const systemToken = process.env.MESSENGER_VERIFY_TOKEN || process.env.WHATSAPP_VERIFY_TOKEN;
+    const systemToken = process.env.META_VERIFY_TOKEN || process.env.MESSENGER_VERIFY_TOKEN;
     if (mode === 'subscribe' && token && token === systemToken) {
       return { valid: true, challenge };
     }

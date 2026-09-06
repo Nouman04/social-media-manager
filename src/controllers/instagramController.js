@@ -97,17 +97,18 @@ module.exports = {
 
   /**
    * PUT /api/v1/instagram/account
-   * Update the connected account — mainly to rotate an expiring token.
-   * Body: { business_id, page_id?, access_token?, is_active? }
+   * Update the connected account — mainly to rotate an expiring token, or to
+   * set ig_scoped_id once it's been observed on a real inbound webhook event.
+   * Body: { business_id, page_id?, access_token?, is_active?, ig_scoped_id? }
    */
   updateAccount: async (req, res) => {
     try {
-      const { business_id, page_id, access_token, is_active } = req.body;
+      const { business_id, page_id, access_token, is_active, ig_scoped_id } = req.body;
       if (!business_id) {
         return res.status(400).json({ success: false, message: 'Validation failed', details: ['business_id is required'] });
       }
 
-      const account = await instagramService.updateAccount(business_id, { page_id, access_token, is_active });
+      const account = await instagramService.updateAccount(business_id, { page_id, access_token, is_active, ig_scoped_id });
       return res.status(200).json({ success: true, message: 'Instagram account updated successfully', account });
     } catch (err) {
       return fail(res, err, 'updateAccount');
@@ -324,53 +325,32 @@ module.exports = {
     }
   },
 
-  // ══════════════════════════════════════════════════════════════════════════
-  //  6. WEBHOOKS
-  // ══════════════════════════════════════════════════════════════════════════
-
   /**
-   * GET /api/v1/instagram/webhook
-   * Meta calls this once when the webhook URL is registered.
+   * PUT /api/v1/instagram/conversations/:id
+   * Set ig_send_id — the conversation-scoped recipient id Meta's send
+   * endpoint requires but never appears in inbound webhooks. Look it up via
+   * GET /{ig_user_id}/conversations?fields=participants and match by
+   * username, then set it here before replying to a new contact.
+   * Body: { business_id, ig_send_id }
    */
-  verifyWebhook: (req, res) => {
-    const mode = req.query['hub.mode'];
-    const token = req.query['hub.verify_token'];
-    const challenge = req.query['hub.challenge'];
+  updateConversationSendId: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { business_id, ig_send_id } = req.body;
 
-    const result = instagramService.verifyWebhookToken(mode, token, challenge);
+      const missing = missingFields({ business_id, ig_send_id });
+      if (missing.length) {
+        return res.status(400).json({ success: false, message: 'Validation failed', details: missing });
+      }
 
-    if (result.valid) {
-      console.log('[instagramController.verifyWebhook] Webhook verified successfully.');
-      return res.status(200).send(result.challenge);
+      const conversation = await instagramService.updateConversationSendId(business_id, id, ig_send_id);
+      return res.status(200).json({ success: true, message: 'ig_send_id updated', conversation });
+    } catch (err) {
+      return fail(res, err, 'updateConversationSendId');
     }
-
-    console.warn('[instagramController.verifyWebhook] Verification failed — invalid token or mode.');
-    return res.status(403).json({ success: false, message: 'Forbidden: invalid verify token or mode' });
   },
 
-  /**
-   * POST /api/v1/instagram/webhook
-   *
-   * Meta posts Direct messages and receipts here. Always acknowledge with 200
-   * immediately — any non-2xx makes Meta retry and eventually disable the
-   * subscription. Processing happens after the response is flushed.
-   */
-  handleWebhook: (req, res) => {
-    res.status(200).send('EVENT_RECEIVED');
-
-    const body = req.body;
-
-    if (body?.object !== 'instagram') {
-      console.warn('[instagramController.handleWebhook] Ignored non-instagram object:', body?.object);
-      return;
-    }
-
-    instagramService.processWebhookEvent(body)
-      .then((result) => {
-        console.log('[instagramController.handleWebhook] Processing result:', result);
-      })
-      .catch((err) => {
-        console.error('[instagramController.handleWebhook] Unhandled processing error:', err.message);
-      });
-  },
+  // Webhook verification/delivery is handled by the shared
+  // /api/v1/meta/webhook endpoint (metaWebhookController) rather than here —
+  // it calls instagramService.verifyWebhookToken / processWebhookEvent directly.
 };

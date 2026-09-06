@@ -8,19 +8,10 @@ const authenticate = require('../middleware/authenticate');
 // ─── PUBLIC ROUTES (no JWT) ───────────────────────────────────────────────────
 // Meta's servers call the webhook endpoints directly — they carry no auth
 // header. These MUST be registered before the JWT middleware below.
-
-/**
- * GET /api/v1/messenger/webhook
- * Meta verification handshake — echoes hub.challenge when the token matches.
- */
-router.get('/webhook', messengerController.verifyWebhook);
-
-/**
- * POST /api/v1/messenger/webhook
- * Real-time event delivery (messages, postbacks, read/delivery receipts).
- * Responds 200 immediately; processing is fire-and-forget.
- */
-router.post('/webhook', messengerController.handleWebhook);
+//
+// The webhook itself now lives at the shared /api/v1/meta/webhook endpoint
+// (see metaWebhookRoutes.js) rather than here — Instagram and Messenger
+// deliver to that one Callback URL. WhatsApp keeps its own separate webhook.
 
 // ─── JWT Auth Middleware ───────────────────────────────────────────────────────
 // Applied only to the routes defined AFTER this block.
