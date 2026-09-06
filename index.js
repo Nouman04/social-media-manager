@@ -39,6 +39,17 @@ app.get("/", (req, res) => {
   res.json({ success: true, message: "SMM API Server Running" });
 });
 
+// Meta App Dashboard's Privacy Policy / Terms of Service URL fields point here.
+app.get("/privacy-policy", (req, res) => {
+  res.sendFile(path.join(__dirname, "src/public/privacy-policy.html"));
+});
+app.get("/terms-of-service", (req, res) => {
+  res.sendFile(path.join(__dirname, "src/public/terms-of-service.html"));
+});
+app.get("/data-deletion", (req, res) => {
+  res.sendFile(path.join(__dirname, "src/public/data-deletion.html"));
+});
+
 // Socket.IO needs the underlying HTTP server, so create it explicitly
 // rather than letting app.listen() build one internally.
 const server = http.createServer(app);

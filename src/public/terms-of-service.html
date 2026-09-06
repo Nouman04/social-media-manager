@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Terms of Service — SMM Chat</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --ink: #1a2029;
+    --ink-muted: #5b6472;
+    --ink-faint: #8891a0;
+    --line: #e3e6eb;
+    --accent: #1f6f63;
+    --accent-soft: #e7f2ef;
+    --chip-bg: #eef1f5;
+    --code-bg: #eef1f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151a; --surface: #181c22; --ink: #e7eaee; --ink-muted: #9aa3af;
+      --ink-faint: #6b7280; --line: #262b33; --accent: #59c4ac; --accent-soft: #16302b;
+      --chip-bg: #1e232b; --code-bg: #1e232b;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151a; --surface: #181c22; --ink: #e7eaee; --ink-muted: #9aa3af;
+    --ink-faint: #6b7280; --line: #262b33; --accent: #59c4ac; --accent-soft: #16302b;
+    --chip-bg: #1e232b; --code-bg: #1e232b;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); }
+  body {
+    margin: 0; color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    font-size: 16px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+  }
+  h1, h2 { font-family: "IBM Plex Serif", ui-serif, Georgia, serif; text-wrap: balance; color: var(--ink); }
+  .mono { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace; }
+  a { color: var(--accent); }
+  a:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .shell { max-width: 960px; margin: 0 auto; padding: 56px 24px 96px; }
+
+  header.doc { border-bottom: 1px solid var(--line); padding-bottom: 28px; margin-bottom: 40px; }
+  .mark {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: "IBM Plex Mono", monospace; font-size: 12.5px;
+    letter-spacing: .06em; color: var(--accent); text-transform: uppercase; margin-bottom: 18px;
+  }
+  .mark .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+  h1.title { font-size: clamp(28px, 4vw, 38px); font-weight: 600; margin: 0 0 14px; letter-spacing: -.01em; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+  .chip {
+    font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink-muted);
+    background: var(--chip-bg); border: 1px solid var(--line); border-radius: 6px;
+    padding: 5px 10px; display: inline-flex; align-items: baseline; gap: 6px;
+  }
+  .chip b { color: var(--ink); font-weight: 500; }
+
+  .layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 56px; align-items: start; }
+  @media (max-width: 780px) { .layout { grid-template-columns: 1fr; } nav.toc { display: none; } }
+
+  nav.toc { position: sticky; top: 40px; }
+  nav.toc .label {
+    font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--ink-faint); margin-bottom: 12px;
+  }
+  nav.toc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  nav.toc a {
+    display: block; padding: 7px 10px; border-radius: 6px; color: var(--ink-muted);
+    text-decoration: none; font-size: 13.5px; line-height: 1.4;
+  }
+  nav.toc a:hover { background: var(--chip-bg); color: var(--ink); }
+
+  main { min-width: 0; }
+  section { padding: 30px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 24px; }
+  section:last-of-type { border-bottom: none; }
+  section h2 { font-size: 20px; font-weight: 600; margin: 0 0 4px; display: flex; align-items: baseline; gap: 10px; }
+  section h2 .num { font-family: "IBM Plex Mono", monospace; font-size: 14px; color: var(--accent); font-weight: 500; }
+  section p, section li { max-width: 68ch; color: var(--ink); }
+  section p { margin: 14px 0; }
+  section ul { margin: 14px 0; padding-left: 22px; }
+  section li { margin: 6px 0; }
+  section .sub { color: var(--ink-muted); font-size: 14.5px; margin-top: -4px; }
+
+  .callout {
+    background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 8px;
+    padding: 14px 16px; font-size: 14.5px; color: var(--ink); margin: 16px 0;
+  }
+  .callout b { color: var(--accent); }
+
+  code.inline {
+    font-family: "IBM Plex Mono", monospace; background: var(--code-bg);
+    padding: 1px 6px; border-radius: 4px; font-size: .9em;
+  }
+
+  footer.doc {
+    margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--line);
+    color: var(--ink-faint); font-size: 13px;
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="doc">
+    <div class="mark"><span class="dot"></span> SMM Chat</div>
+    <h1 class="title">Terms of Service</h1>
+    <div class="meta-row">
+      <span class="chip">Effective <b>September 6, 2026</b></span>
+      <span class="chip">Version <b class="mono">1.0</b></span>
+      <span class="chip">Applies to <b>SMM Chat inbox &amp; API</b></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Table of contents">
+      <div class="label">On this page</div>
+      <ol>
+        <li><a href="#acceptance">1. Acceptance</a></li>
+        <li><a href="#service">2. The Service</a></li>
+        <li><a href="#accounts">3. Accounts &amp; access</a></li>
+        <li><a href="#acceptable-use">4. Acceptable use</a></li>
+        <li><a href="#meta-platforms">5. Third-party platforms</a></li>
+        <li><a href="#fees">6. Fees</a></li>
+        <li><a href="#termination">7. Suspension &amp; termination</a></li>
+        <li><a href="#disclaimers">8. Disclaimers</a></li>
+        <li><a href="#liability">9. Limitation of liability</a></li>
+        <li><a href="#law">10. Governing law</a></li>
+        <li><a href="#changes">11. Changes to these terms</a></li>
+        <li><a href="#contact">12. Contact</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <section id="acceptance">
+        <h2><span class="num">§1</span> Acceptance</h2>
+        <p>
+          These terms govern use of SMM Chat ("the Service"), a shared inbox that lets a
+          business send and receive WhatsApp and Instagram messages through Meta's
+          Graph API. By connecting a WhatsApp Business Account or Instagram Professional
+          account, or by using the Service to message customers, a business agrees to
+          these terms on behalf of itself and everyone it authorizes to use its account.
+        </p>
+        <p class="sub">
+          This is a development-stage terms document published to satisfy Meta's
+          platform requirements while the app is being built and tested. It should be
+          reviewed and replaced with counsel-approved terms before commercial launch.
+        </p>
+      </section>
+
+      <section id="service">
+        <h2><span class="num">§2</span> The Service</h2>
+        <p>
+          SMM Chat lets an authorized business connect its own WhatsApp Business Account
+          and/or Instagram Professional account, view incoming customer messages in one
+          inbox, and reply from within it. The Service relays messages through Meta's
+          Graph API — it does not operate WhatsApp or Instagram itself, and message
+          delivery is subject to Meta's own availability and rules.
+        </p>
+      </section>
+
+      <section id="accounts">
+        <h2><span class="num">§3</span> Accounts &amp; access</h2>
+        <ul>
+          <li>A business is responsible for the accuracy of the account details it provides and for keeping its sign-in credentials confidential.</li>
+          <li>A business is responsible for the actions of every team member it grants access to its account.</li>
+          <li>A business must have the legal right to connect the WhatsApp number and Instagram account it links to the Service — for example, it must be the account owner or an authorized administrator.</li>
+        </ul>
+      </section>
+
+      <section id="acceptable-use">
+        <h2><span class="num">§4</span> Acceptable use</h2>
+        <p>When using the Service, a business agrees not to:</p>
+        <ul>
+          <li>Send unsolicited bulk messages, spam, or messages outside the messaging windows and consent rules that WhatsApp and Instagram require.</li>
+          <li>Use the Service to send content that is illegal, deceptive, or that violates Meta's <a href="https://developers.facebook.com/devpolicy/" target="_blank" rel="noopener">Platform Terms</a> or the <a href="https://transparency.fb.com/policies/community-standards/" target="_blank" rel="noopener">WhatsApp/Instagram policies</a> that apply to the connected accounts.</li>
+          <li>Attempt to access another business's conversations, accounts, or credentials.</li>
+          <li>Interfere with or disrupt the Service's infrastructure, or attempt to bypass its access controls.</li>
+        </ul>
+      </section>
+
+      <section id="meta-platforms">
+        <h2><span class="num">§5</span> Third-party platforms</h2>
+        <div class="callout">
+          The Service depends on Meta's Graph API to send and receive WhatsApp and
+          Instagram messages. A business's use of WhatsApp and Instagram through the
+          Service remains subject to <b>Meta's own terms</b> for those products, in
+          addition to these terms. We are not responsible for outages, policy changes,
+          or account restrictions imposed by Meta.
+        </div>
+      </section>
+
+      <section id="fees">
+        <h2><span class="num">§6</span> Fees</h2>
+        <p>
+          The Service is currently offered on a testing/development basis at no charge.
+          Any future paid plan will be described separately before it applies, and
+          nothing in these terms should be read as a current fee commitment. Message
+          delivery through WhatsApp may itself be subject to Meta's own conversation-based
+          pricing, billed separately by Meta to the business's own WhatsApp Business
+          Account.
+        </p>
+      </section>
+
+      <section id="termination">
+        <h2><span class="num">§7</span> Suspension &amp; termination</h2>
+        <p>
+          A business may disconnect its WhatsApp or Instagram account, or stop using the
+          Service, at any time. We may suspend or terminate access to the Service for a
+          business that violates §4 (Acceptable use), or where required to comply with
+          Meta's platform policies.
+        </p>
+      </section>
+
+      <section id="disclaimers">
+        <h2><span class="num">§8</span> Disclaimers</h2>
+        <p>
+          The Service is provided "as is," during active development, without
+          warranties of any kind, express or implied, including fitness for a
+          particular purpose or uninterrupted availability. Message delivery,
+          formatting, and account behavior ultimately depend on Meta's platforms and
+          are outside our control.
+        </p>
+      </section>
+
+      <section id="liability">
+        <h2><span class="num">§9</span> Limitation of liability</h2>
+        <p>
+          To the fullest extent permitted by law, SMM Chat and its operators are not
+          liable for indirect, incidental, or consequential damages arising from use of
+          the Service, including lost messages, lost business, or account restrictions
+          imposed by Meta.
+        </p>
+      </section>
+
+      <section id="law">
+        <h2><span class="num">§10</span> Governing law</h2>
+        <p>
+          These terms are governed by the laws of <code class="inline">[jurisdiction — to be set before production launch]</code>,
+          without regard to conflict-of-law principles.
+        </p>
+      </section>
+
+      <section id="changes">
+        <h2><span class="num">§11</span> Changes to these terms</h2>
+        <p>
+          We may update these terms as the Service changes. The "Effective" date at the
+          top reflects the latest revision. Continued use of the Service after a change
+          takes effect constitutes acceptance of the revised terms.
+        </p>
+      </section>
+
+      <section id="contact">
+        <h2><span class="num">§12</span> Contact</h2>
+        <p>
+          Questions about these terms can be sent to
+          <code class="inline">support@your-domain.example</code> — replace with your
+          real support address before sharing these terms outside of testing.
+        </p>
+      </section>
+    </main>
+  </div>
+
+  <footer class="doc">
+    <span>SMM Chat — Terms of Service</span>
+    <span class="mono">Draft for platform review · not final legal copy</span>
+  </footer>
+</div>
+</body>
+</html>

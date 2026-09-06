@@ -1,8 +1,10 @@
 'use strict';
 
 const express = require('express');
+const path = require('path');
 const router = express.Router();
 const instagramController = require('../controllers/instagramController');
+const instagramOnboardingController = require('../controllers/instagramOnboardingController');
 const authenticate = require('../middleware/authenticate');
 
 // ─── PUBLIC ROUTES (no JWT) ───────────────────────────────────────────────────
@@ -21,6 +23,29 @@ router.get('/webhook', instagramController.verifyWebhook);
  * Responds 200 immediately; processing is fire-and-forget.
  */
 router.post('/webhook', instagramController.handleWebhook);
+
+/**
+ * GET /api/v1/instagram/embedded-signup/config
+ * Public: app id + Facebook Login config id for the connect page popup.
+ */
+router.get('/embedded-signup/config', instagramOnboardingController.getConfig);
+
+/**
+ * GET /api/v1/instagram/connect
+ * Public: serves the vendor-facing Connect Instagram page.
+ */
+router.get('/connect', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/instagram-connect.html'));
+});
+
+/**
+ * GET /api/v1/instagram/chat
+ * Public: serves the live chat / inbox page. The page itself signs in and
+ * calls the protected APIs with a JWT.
+ */
+router.get('/chat', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/instagram-chat.html'));
+});
 
 // ─── JWT Auth Middleware ───────────────────────────────────────────────────────
 // Applied only to the routes defined AFTER this block.
@@ -41,6 +66,14 @@ router.get('/verify-credentials', instagramController.verifyCredentials);
  * Body: { business_id, ig_user_id, page_id, access_token }
  */
 router.post('/account', instagramController.addAccount);
+
+/**
+ * POST /api/v1/instagram/embedded-signup
+ * Finish Embedded Signup: exchange code, find the linked Instagram account,
+ * subscribe the Page for messaging, and store it against the business.
+ * Body: { business_id, code, redirect_uri?, page_id? }
+ */
+router.post('/embedded-signup', instagramOnboardingController.completeSignup);
 
 /**
  * GET /api/v1/instagram/account?business_id=
