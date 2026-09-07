@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Messenger Inbox — SMM</title>
+<style>
+  :root {
+    --bg: #fafafa; --panel: #fff; --side: #f7f8fa; --text: #262626; --muted: #8e8e8e;
+    --line: #efefef; --brand1: #00c6ff; --brand2: #0084ff; --brand3: #a033ff; --brand4: #ff5679;
+    --out: #efefef; --in: #fff; --outbg: linear-gradient(135deg,#0084ff,#0066cc);
+    --err-bg: #fdeded; --err-line: #f5c2c0; --err-text: #a4262c;
+    --ok-bg: #edf7ee; --ok-line: #b7dfbb; --ok-text: #1e6c26;
+    --warn-bg: #fff8e6; --warn-line: #f0d68a; --warn-text: #6b5410;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  /* ── login gate ── */
+  .gate {
+    position: fixed; inset: 0; background: #f5f6f8; display: flex;
+    align-items: center; justify-content: center; padding: 20px; z-index: 50;
+  }
+  .gate.hidden { display: none; }
+  .gate .box {
+    background: #fff; border: 1px solid var(--line); border-radius: 12px;
+    padding: 28px; width: 100%; max-width: 380px;
+  }
+  .gate h1 { margin: 0 0 4px; font-size: 19px; }
+  .gate p.sub { margin: 0 0 18px; color: var(--muted); font-size: 13px; }
+
+  label { display: block; font-weight: 600; font-size: 12px; margin: 12px 0 5px; }
+  input, select, textarea {
+    width: 100%; padding: 9px 11px; font-size: 14px; font-family: inherit;
+    border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--text);
+  }
+  input:focus, select:focus, textarea:focus { outline: 2px solid #b3d7ff; outline-offset: -1px; }
+  button {
+    padding: 9px 14px; font-size: 14px; font-weight: 600; font-family: inherit;
+    color: #fff; background: var(--brand2); border: 0; border-radius: 6px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { filter: brightness(1.1); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.wide { width: 100%; margin-top: 16px; }
+  button.msg { background: linear-gradient(45deg, var(--brand1), var(--brand2), var(--brand3), var(--brand4)); }
+  button.ghost { background: #eceef1; color: var(--text); }
+
+  /* ── shell ── */
+  .shell { display: none; height: 100vh; flex-direction: column; }
+  .shell.on { display: flex; }
+
+  .topbar {
+    background: #fff; border-bottom: 1px solid var(--line); color: #262626; padding: 9px 14px;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  }
+  .topbar .brand {
+    font-weight: 700; font-size: 15px;
+    background: linear-gradient(45deg, var(--brand1), var(--brand2), var(--brand3), var(--brand4));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .topbar .grow { flex: 1; }
+  .topbar select { width: auto; padding: 5px 8px; font-size: 13px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #f0b429; display: inline-block; }
+  .dot.on { background: #6ee787; }
+  .topbar .who { font-size: 12px; opacity: .8; }
+  .topbar a.connectlink { font-size: 12px; color: var(--brand2); text-decoration: none; margin-left: 4px; }
+
+  /* ── body split ── */
+  .split { flex: 1; display: flex; min-height: 0; }
+  .side { width: 300px; background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+  .side .newchat { padding: 10px; border-bottom: 1px solid var(--line); display: flex; gap: 6px; }
+  .side .newchat input { flex: 1; }
+  .threads { flex: 1; overflow-y: auto; }
+  .thread { padding: 10px 12px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .thread:hover { background: #eef0f2; }
+  .thread.active { background: #e2e8ec; }
+  .thread .name { font-weight: 600; font-size: 13px; }
+  .thread .prev { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .empty { padding: 18px 12px; color: var(--muted); font-size: 13px; }
+
+  .chat { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .chat .head {
+    background: var(--panel); border-bottom: 1px solid var(--line);
+    padding: 10px 14px; display: flex; align-items: center; gap: 10px;
+  }
+  .chat .head .nm { font-weight: 600; }
+  .chat .head .sm { color: var(--muted); font-size: 12px; }
+  .chat .head .grow { flex: 1; }
+  .msgs { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 6px; }
+  .bubble {
+    max-width: 68%; padding: 7px 10px; border-radius: 16px; background: var(--in); border: 1px solid var(--line);
+    word-wrap: break-word; white-space: pre-wrap; position: relative;
+  }
+  .bubble.out { align-self: flex-end; background: var(--outbg); color: #fff; border: none; }
+  .bubble .meta { font-size: 10px; color: var(--muted); text-align: right; margin-top: 3px; }
+  .bubble.out .meta { color: rgba(255,255,255,.8); }
+  .bubble img, .bubble video { max-width: 100%; border-radius: 10px; display: block; }
+  .bubble a.file { font-size: 13px; color: #027eb5; text-decoration: none; }
+  .bubble.out a.file { color: #fff; text-decoration: underline; }
+  .bubble .qr { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .bubble .qr span { background: #eef4ff; color: #1b4a8f; border: 1px solid #c3d7fb; border-radius: 14px; padding: 3px 10px; font-size: 12px; }
+
+  .composer { background: var(--panel); border-top: 1px solid var(--line); padding: 10px 14px; }
+  .composer .row { display: flex; gap: 8px; align-items: flex-end; }
+  .composer textarea { resize: none; height: 40px; }
+  .composer .opts { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+  .composer .opts label { margin: 0; font-weight: 500; font-size: 12px; color: var(--muted); }
+  .win-hint { font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+  .msg { margin: 8px 14px; padding: 9px 12px; border-radius: 6px; font-size: 13px; display: none; }
+  .msg.show { display: block; }
+  .msg.error { background: var(--err-bg); border: 1px solid var(--err-line); color: var(--err-text); }
+  .msg.ok    { background: var(--ok-bg);  border: 1px solid var(--ok-line);  color: var(--ok-text); }
+  .msg.warn  { background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--warn-text); }
+  .msg.info  { background: #eef4ff; border: 1px solid #c3d7fb; color: #1b4a8f; }
+</style>
+</head>
+<body>
+
+<!-- ── LOGIN GATE ─────────────────────────────────────────────────────────── -->
+<div class="gate" id="gate">
+  <div class="box">
+    <h1>Messenger Inbox</h1>
+    <p class="sub">Sign in to open your business inbox.</p>
+
+    <div id="gStep1">
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username" placeholder="you@company.com" />
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" />
+      <button class="wide" id="btnLogin">Sign in</button>
+    </div>
+
+    <div id="gStep2" style="display:none">
+      <label for="code">Verification code</label>
+      <input id="code" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code" />
+      <button class="wide" id="btnVerify">Verify &amp; open inbox</button>
+    </div>
+
+    <div id="gateMsg" class="msg" style="margin:14px 0 0"></div>
+  </div>
+</div>
+
+<!-- ── APP ────────────────────────────────────────────────────────────────── -->
+<div class="shell" id="shell">
+  <div class="topbar">
+    <span class="brand">Messenger Inbox</span>
+    <select id="business"></select>
+    <a class="connectlink" href="/api/v1/messenger/connect">Connect / manage account</a>
+    <span><span class="dot" id="wsDot"></span> <span id="wsText" style="font-size:12px">connecting…</span></span>
+    <span class="grow"></span>
+    <span class="who" id="who"></span>
+    <button class="ghost" id="btnLogout" style="padding:5px 10px;font-size:12px">Sign out</button>
+  </div>
+
+  <div class="split">
+    <div class="side">
+      <div class="newchat">
+        <input id="newPsid" placeholder="Add PSID e.g. 179384756..." />
+        <button id="btnOpenPsid">Open</button>
+      </div>
+      <div class="threads" id="threads"><div class="empty">No conversations yet.</div></div>
+    </div>
+
+    <div class="chat">
+      <div class="head">
+        <div>
+          <div class="nm" id="chatName">Select a conversation</div>
+          <div class="sm" id="chatSub">or type a PSID on the left to start one</div>
+        </div>
+        <div class="grow"></div>
+        <button class="ghost" id="btnMarkSeen" style="padding:5px 10px;font-size:12px" disabled>Mark seen</button>
+      </div>
+
+      <div class="msgs" id="msgs"></div>
+      <div id="appMsg" class="msg"></div>
+
+      <div class="composer">
+        <div class="row">
+          <textarea id="text" placeholder="Type a message…"></textarea>
+          <button class="msg" id="btnSend">Send</button>
+        </div>
+        <div class="opts">
+          <label for="mediaUrl">Media URL:</label>
+          <input type="text" id="mediaUrl" placeholder="https://example.com/photo.jpg" style="flex:1" />
+          <select id="mediaType" style="width:auto">
+            <option value="image">image</option>
+            <option value="video">video</option>
+            <option value="audio">audio</option>
+            <option value="file">file</option>
+          </select>
+          <button class="ghost" id="btnSendMedia">Send media</button>
+        </div>
+        <div class="win-hint">Free-form replies only work inside the 24-hour window after the contact's last message, unless sent with a message tag (e.g. HUMAN_AGENT).</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+(function () {
+  var API = window.location.origin;
+  var auth = { token: null, user: null };
+  var businessId = null;
+  var current = { conversationId: null, contact: null, name: null };
+  var socket = null;
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  function note(el, text, kind) {
+    if (!text) { el.className = 'msg'; return; }
+    el.textContent = text;
+    el.className = 'msg show ' + (kind || 'info');
+  }
+  var gateNote = function (t, k) { note($('gateMsg'), t, k); };
+  var appNote  = function (t, k) { note($('appMsg'), t, k); };
+
+  function api(path, opts) {
+    opts = opts || {};
+    opts.headers = Object.assign({ Authorization: 'Bearer ' + auth.token }, opts.headers || {});
+    return fetch(API + path, opts).then(function (r) {
+      return r.json().then(function (b) { return { ok: r.ok, body: b }; });
+    });
+  }
+  function postJson(path, body, token) {
+    return fetch(API + path, {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' },
+        token ? { Authorization: 'Bearer ' + token } : {}),
+      body: JSON.stringify(body)
+    }).then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); });
+  }
+  var psidClean = function (v) { return String(v || '').replace(/\D/g, ''); };
+
+  // ── auth ────────────────────────────────────────────────────────────────
+  try {
+    var saved = JSON.parse(sessionStorage.getItem('smm_auth') || 'null');
+    if (saved && saved.token) auth = saved;
+  } catch (e) {}
+
+  $('btnLogin').addEventListener('click', function () {
+    var email = $('email').value.trim(), password = $('password').value;
+    if (!email || !password) { gateNote('Enter your email and password.', 'error'); return; }
+    this.disabled = true; gateNote('Checking…');
+    postJson('/auth/login', { email: email, password: password }).then(function (res) {
+      $('btnLogin').disabled = false;
+      if (!res.ok) { gateNote(res.body.message || 'Sign-in failed.', 'error'); return; }
+      $('gStep1').style.display = 'none';
+      $('gStep2').style.display = 'block';
+      gateNote('We emailed a 6-digit code to ' + email + '.', 'info');
+      $('code').focus();
+    }).catch(function (e) { $('btnLogin').disabled = false; gateNote(e.message, 'error'); });
+  });
+
+  $('btnVerify').addEventListener('click', function () {
+    var code = $('code').value.trim();
+    if (!code) { gateNote('Enter the code.', 'error'); return; }
+    this.disabled = true; gateNote('Verifying…');
+    postJson('/auth/verify-2fa', { email: $('email').value.trim(), code: code }).then(function (res) {
+      $('btnVerify').disabled = false;
+      if (!res.ok) { gateNote(res.body.message || 'Verification failed.', 'error'); return; }
+      auth = { token: res.body.token, user: res.body.user };
+      try { sessionStorage.setItem('smm_auth', JSON.stringify(auth)); } catch (e) {}
+      boot();
+    }).catch(function (e) { $('btnVerify').disabled = false; gateNote(e.message, 'error'); });
+  });
+
+  $('btnLogout').addEventListener('click', function () {
+    try { sessionStorage.removeItem('smm_auth'); } catch (e) {}
+    if (socket) socket.disconnect();
+    location.reload();
+  });
+
+  // ── boot ────────────────────────────────────────────────────────────────
+  function boot() {
+    var u = auth.user || {};
+    var list = u.businesses || [];
+    $('who').textContent = u.name || u.email || '';
+
+    if (!list.length) {
+      gateNote('This account does not belong to any business.', 'warn');
+      return;
+    }
+
+    var sel = $('business');
+    sel.innerHTML = '';
+    list.forEach(function (b) {
+      var o = document.createElement('option');
+      o.value = b.id; o.textContent = b.name;
+      sel.appendChild(o);
+    });
+    businessId = list[0].id;
+
+    $('gate').className = 'gate hidden';
+    $('shell').className = 'shell on';
+
+    connectSocket();
+    loadThreads();
+  }
+
+  $('business').addEventListener('change', function () {
+    businessId = this.value;
+    current = { conversationId: null, contact: null, name: null };
+    $('msgs').innerHTML = '';
+    $('chatName').textContent = 'Select a conversation';
+    $('chatSub').textContent = '';
+    $('btnMarkSeen').disabled = true;
+    joinRoom();
+    loadThreads();
+  });
+
+  // ── websocket ───────────────────────────────────────────────────────────
+  function connectSocket() {
+    socket = io(API, { transports: ['websocket', 'polling'] });
+
+    socket.on('connect', function () {
+      $('wsDot').className = 'dot on';
+      $('wsText').textContent = 'live';
+      joinRoom();
+    });
+    socket.on('disconnect', function () {
+      $('wsDot').className = 'dot';
+      $('wsText').textContent = 'offline';
+    });
+
+    // A contact replied.
+    socket.on('message:inbound', function (data) {
+      var conv = data.conversation || {};
+      if (isOpen(conv)) appendMessage(data.message);
+      loadThreads();
+      if (!isOpen(conv)) {
+        appNote('New message from ' + (conv.contact_name || conv.contact_identifier), 'info');
+      }
+    });
+
+    // Something we sent (possibly from another tab).
+    socket.on('message:outbound', function (data) {
+      if (isOpen(data.conversation || {})) upsertMessage(data.message);
+      loadThreads();
+    });
+
+    // Delivery / read receipts.
+    socket.on('message:status', function (s) {
+      var el = document.querySelector('[data-msg-id="' + s.id + '"] .meta .st');
+      if (el) el.textContent = s.status;
+      if (s.status === 'failed' && s.error_message) {
+        appNote('Message failed: ' + s.error_message, 'error');
+      }
+    });
+  }
+
+  function joinRoom() {
+    if (socket && socket.connected && businessId) socket.emit('join', { business_id: businessId });
+  }
+  function isOpen(conv) {
+    if (current.conversationId && conv.id) return String(conv.id) === String(current.conversationId);
+    if (current.contact && conv.contact_identifier) return conv.contact_identifier === current.contact;
+    return false;
+  }
+
+  // ── threads ─────────────────────────────────────────────────────────────
+  function loadThreads() {
+    api('/api/v1/messenger/conversations?business_id=' + businessId).then(function (res) {
+      var box = $('threads');
+      if (!res.ok) { box.innerHTML = '<div class="empty">' + (res.body.message || 'could not load') + '</div>'; return; }
+      var list = res.body.conversations || [];
+      if (!list.length) { box.innerHTML = '<div class="empty">No conversations yet.</div>'; return; }
+
+      box.innerHTML = '';
+      list.forEach(function (c) {
+        var d = document.createElement('div');
+        d.className = 'thread' + (isOpen(c) ? ' active' : '');
+        var prev = c.last_message ? preview(c.last_message) : '';
+        d.innerHTML = '<div class="name">' + (c.contact_name || c.contact_identifier) + '</div>' +
+                      '<div class="prev">' + prev + '</div>';
+        d.addEventListener('click', function () { openChat(c); });
+        box.appendChild(d);
+      });
+    });
+  }
+
+  function preview(m) {
+    var p = m.payload || {};
+    if (m.message_type === 'text') return (p.message && p.message.text) || 'text';
+    if (m.message_type === 'postback') return 'postback';
+    if (m.message_type === 'quick_reply') return (p.message && p.message.text) || 'quick reply';
+    return m.message_type;
+  }
+
+  // ── open a chat (existing thread, or a raw PSID) ─────────────────────────
+  function openChat(conv) {
+    current = {
+      conversationId: conv.id || null,
+      contact: conv.contact_identifier || null,
+      name: conv.contact_name || conv.contact_identifier
+    };
+    $('chatName').textContent = current.name || current.contact;
+    $('chatSub').textContent = current.contact ? ('PSID: ' + current.contact) : '';
+    $('btnMarkSeen').disabled = !current.contact;
+    appNote('');
+    loadMessages();
+    loadThreads();
+  }
+
+  $('btnOpenPsid').addEventListener('click', function () {
+    var n = psidClean($('newPsid').value);
+    if (!n) { appNote('Enter a numeric PSID.', 'error'); return; }
+    openChat({ contact_identifier: n });
+    $('newPsid').value = '';
+  });
+
+  function loadMessages() {
+    if (!current.conversationId) {
+      $('msgs').innerHTML = '<div class="empty">No messages yet with this contact.</div>';
+      return;
+    }
+    api('/api/v1/messenger/messages?business_id=' + businessId + '&conversation_id=' + current.conversationId)
+      .then(function (res) {
+        var box = $('msgs');
+        box.innerHTML = '';
+        if (!res.ok) { appNote(res.body.message || 'Could not load messages.', 'error'); return; }
+        (res.body.messages || []).forEach(appendMessage);
+        box.scrollTop = box.scrollHeight;
+      });
+  }
+
+  function upsertMessage(m) {
+    var existing = document.querySelector('[data-msg-id="' + m.id + '"]');
+    if (existing) return;
+    if (!current.conversationId && m.conversation_id) current.conversationId = m.conversation_id;
+    appendMessage(m);
+  }
+
+  function appendMessage(m) {
+    var box = $('msgs');
+    var d = document.createElement('div');
+    d.className = 'bubble ' + (m.direction === 'outbound' ? 'out' : 'in');
+    d.setAttribute('data-msg-id', m.id);
+
+    var p = m.payload || {};
+    var html = '';
+
+    if (m.message_type === 'text' || m.message_type === 'quick_reply') {
+      html = escapeHtml((p.message && p.message.text) || '');
+      var qrs = p.message && Array.isArray(p.message.quick_replies) ? p.message.quick_replies : null;
+      if (qrs && qrs.length) {
+        html += '<div class="qr">' + qrs.map(function (qr) { return '<span>' + escapeHtml(qr.title) + '</span>'; }).join('') + '</div>';
+      }
+    } else if (m.message_type === 'postback') {
+      html = '<span style="opacity:.7">[postback] ' + escapeHtml((p.postback && p.postback.title) || '') + '</span>';
+    } else if (['image', 'video', 'audio', 'file', 'template'].indexOf(m.message_type) !== -1) {
+      var src = null;
+      // Outbound sends store a single `attachment` object; inbound webhook
+      // events carry an `attachments` array — both hang off `payload.message`.
+      var attachment = (p.message && p.message.attachment) ||
+        (p.message && Array.isArray(p.message.attachments) ? p.message.attachments[0] : null);
+      if (attachment && attachment.payload) src = attachment.payload.url;
+
+      if (!src) {
+        html = '<span style="opacity:.7">[' + m.message_type + ' — no preview]</span>';
+      } else if (m.message_type === 'image') {
+        html = '<img src="' + src + '" alt="image">';
+      } else if (m.message_type === 'video') {
+        html = '<video controls src="' + src + '"></video>';
+      } else if (m.message_type === 'audio') {
+        html = '<audio controls src="' + src + '" style="max-width:100%"></audio>';
+      } else {
+        html = '<a class="file" href="' + src + '" target="_blank" rel="noopener">📎 attachment</a>';
+      }
+    } else {
+      html = '<span style="opacity:.7">[' + m.message_type + ']</span>';
+    }
+
+    var when = m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    d.innerHTML = html + '<div class="meta">' + when +
+      (m.direction === 'outbound' ? ' · <span class="st">' + m.status + '</span>' : '') + '</div>';
+
+    box.appendChild(d);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  // ── send text ───────────────────────────────────────────────────────────
+  $('btnSend').addEventListener('click', function () {
+    var body = $('text').value.trim();
+    if (!current.contact) { appNote('Open a conversation first.', 'error'); return; }
+    if (!body) return;
+
+    this.disabled = true;
+    postJson('/api/v1/messenger/send/text', {
+      business_id: Number(businessId), to: current.contact, text: body
+    }, auth.token).then(function (res) {
+      $('btnSend').disabled = false;
+      if (!res.ok) {
+        appNote((res.body.message || 'Send failed.') +
+          (res.body.metaError ? ' — ' + res.body.metaError.message : ''), 'error');
+        return;
+      }
+      $('text').value = '';
+      appNote('');
+      if (res.body.messageRecord) upsertMessage(res.body.messageRecord);
+    }).catch(function (e) { $('btnSend').disabled = false; appNote(e.message, 'error'); });
+  });
+
+  $('text').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('btnSend').click(); }
+  });
+
+  // ── send media (by public URL) ───────────────────────────────────────────
+  $('btnSendMedia').addEventListener('click', function () {
+    var url = $('mediaUrl').value.trim();
+    if (!current.contact) { appNote('Open a conversation first.', 'error'); return; }
+    if (!url) { appNote('Enter a public media URL first.', 'error'); return; }
+
+    this.disabled = true;
+    appNote('Sending…');
+
+    postJson('/api/v1/messenger/send/media', {
+      business_id: Number(businessId), to: current.contact,
+      media_type: $('mediaType').value, media_url: url
+    }, auth.token).then(function (res) {
+      $('btnSendMedia').disabled = false;
+      if (!res.ok) {
+        appNote((res.body.message || 'Media send failed.') +
+          (res.body.metaError ? ' — ' + res.body.metaError.message : ''), 'error');
+        return;
+      }
+      appNote('Media sent.', 'ok');
+      $('mediaUrl').value = '';
+      if (res.body.messageRecord) upsertMessage(res.body.messageRecord);
+    }).catch(function (e) { $('btnSendMedia').disabled = false; appNote(e.message, 'error'); });
+  });
+
+  // ── mark seen ───────────────────────────────────────────────────────────
+  $('btnMarkSeen').addEventListener('click', function () {
+    if (!current.contact) return;
+    this.disabled = true;
+    postJson('/api/v1/messenger/sender-action', {
+      business_id: Number(businessId), to: current.contact, sender_action: 'mark_seen'
+    }, auth.token).then(function (res) {
+      $('btnMarkSeen').disabled = false;
+      appNote(res.ok ? 'Marked as seen.' : (res.body.message || 'Failed.'), res.ok ? 'ok' : 'error');
+    }).catch(function (e) { $('btnMarkSeen').disabled = false; appNote(e.message, 'error'); });
+  });
+
+  if (auth.token && auth.user) boot();
+})();
+</script>
+</body>
+</html>

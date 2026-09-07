@@ -4,6 +4,7 @@ const axios = require('axios');
 const { Op } = require('sequelize');
 const { MessengerDetail, MessengerMessage, Conversation, Business } = require('../../models');
 const { findOrCreateConversation, getPlatformId } = require('../helpers/conversationHelper');
+const realtime = require('../helpers/realtime');
 
 const GRAPH_API_BASE = 'https://graph.facebook.com/v18.0';
 const PLATFORM = 'messenger';
@@ -77,6 +78,28 @@ const createMessageRecord = async ({
 
 const markSent = async (record, mid) => {
   await record.update({ mid, status: 'sent' });
+  await emitOutbound(record);
+};
+
+/**
+ * Mirror an outbound message to every open inbox for its business.
+ * The conversation carries the business id, so it has to be looked up.
+ */
+const emitOutbound = async (record) => {
+  try {
+    const conversation = await Conversation.findByPk(record.conversation_id);
+    if (!conversation) return;
+    realtime.emitToBusiness(conversation.business_id, 'message:outbound', {
+      message: record.toJSON(),
+      conversation: {
+        id: conversation.id,
+        contact_identifier: conversation.contact_identifier,
+        contact_name: conversation.contact_name,
+      },
+    });
+  } catch (err) {
+    console.warn('[messengerService.emitOutbound] skipped:', err.message);
+  }
 };
 
 const markFailed = async (record, errorCode, errorMessage) => {
@@ -660,7 +683,7 @@ const messengerService = {
     });
 
     try {
-      await MessengerMessage.create({
+      const saved = await MessengerMessage.create({
         conversation_id: conversation.id,
         direction: 'inbound',
         from_psid: String(contactPsid),
@@ -678,6 +701,16 @@ const messengerService = {
         { updated_at: new Date() },
         { where: { id: conversation.id }, silent: true }
       );
+
+      // Push it to any open inbox for this tenant.
+      realtime.emitToBusiness(tenantId, 'message:inbound', {
+        message: saved.toJSON(),
+        conversation: {
+          id: conversation.id,
+          contact_identifier: conversation.contact_identifier,
+          contact_name: conversation.contact_name || null,
+        },
+      });
     } catch (dbErr) {
       // Meta retries deliveries; the unique mid makes replays a no-op.
       if (dbErr?.name === 'SequelizeUniqueConstraintError') {
@@ -708,18 +741,29 @@ const messengerService = {
     const watermark = event.read?.watermark ?? event.delivery?.watermark;
     if (!watermark) return;
 
+    const whereClause = {
+      conversation_id: conversation.id,
+      direction: 'outbound',
+      created_at: { [Op.lte]: new Date(Number(watermark)) },
+      status: newStatus === 'read' ? { [Op.in]: ['sent', 'delivered'] } : 'sent',
+    };
+
     try {
-      await MessengerMessage.update(
-        { status: newStatus },
-        {
-          where: {
-            conversation_id: conversation.id,
-            direction: 'outbound',
-            created_at: { [Op.lte]: new Date(Number(watermark)) },
-            status: newStatus === 'read' ? { [Op.in]: ['sent', 'delivered'] } : 'sent',
-          },
-        }
-      );
+      // MySQL's UPDATE doesn't hand back the affected rows, so capture the ids
+      // that are about to change before applying the update.
+      const targets = await MessengerMessage.findAll({ where: whereClause, attributes: ['id', 'mid'] });
+      if (!targets.length) return;
+
+      await MessengerMessage.update({ status: newStatus }, { where: whereClause });
+
+      targets.forEach((record) => {
+        realtime.emitToBusiness(detail.business_id, 'message:status', {
+          id: record.id,
+          mid: record.mid,
+          conversation_id: conversation.id,
+          status: newStatus,
+        });
+      });
     } catch (dbErr) {
       console.error('[messengerService._handleStatusUpdate] DB error:', dbErr.message);
     }

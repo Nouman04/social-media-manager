@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Connect Messenger — SMM</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #fff; --text: #1c1e21; --muted: #65676b;
+    --line: #dcdfe3; --blue: #1877f2; --blue-dark: #145dbf;
+    --msg1: #00c6ff; --msg2: #0084ff; --msg3: #a033ff; --msg4: #ff5679;
+    --err-bg: #fdeded; --err-line: #f5c2c0; --err-text: #a4262c;
+    --ok-bg: #edf7ee; --ok-line: #b7dfbb; --ok-text: #1e6c26;
+    --warn-bg: #fff8e6; --warn-line: #f0d68a; --warn-text: #6b5410;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 24px 16px; background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .card {
+    width: 100%; max-width: 430px; background: var(--card);
+    border: 1px solid var(--line); border-radius: 12px; padding: 30px 28px;
+  }
+  .logo {
+    width: 52px; height: 52px; margin: 0 auto 14px; border-radius: 13px;
+    background: linear-gradient(45deg, var(--msg1), var(--msg2), var(--msg3), var(--msg4));
+    display: flex; align-items: center; justify-content: center;
+  }
+  .logo svg { width: 28px; height: 28px; fill: #fff; }
+  h1 { margin: 0 0 5px; font-size: 21px; text-align: center; }
+  .sub { margin: 0 0 22px; color: var(--muted); font-size: 14px; text-align: center; }
+
+  .steps-bar { display: flex; gap: 6px; margin-bottom: 22px; }
+  .pill {
+    flex: 1; text-align: center; font-size: 11px; font-weight: 600; padding: 6px 3px;
+    border-radius: 20px; background: #eceef1; color: var(--muted);
+  }
+  .pill.active { background: var(--blue); color: #fff; }
+  .pill.done { background: #d9f0dd; color: var(--ok-text); }
+
+  label { display: block; font-weight: 600; font-size: 13px; margin: 14px 0 5px; }
+  input, select {
+    width: 100%; padding: 10px 12px; font-size: 14px; font-family: inherit;
+    border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--text);
+  }
+  input:focus, select:focus { outline: 2px solid #b9d2ff; outline-offset: -1px; border-color: #6a9bff; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 5px; }
+
+  button {
+    width: 100%; margin-top: 18px; padding: 12px 16px; font-size: 15px; font-weight: 600;
+    font-family: inherit; color: #fff; background: var(--blue); border: 0; border-radius: 8px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 9px;
+  }
+  button.msg { background: linear-gradient(45deg, var(--msg1), var(--msg2), var(--msg3), var(--msg4)); }
+  button:hover:not(:disabled) { filter: brightness(1.08); }
+  button:disabled { opacity: .55; cursor: not-allowed; }
+  button svg { width: 18px; height: 18px; fill: #fff; }
+  button.link {
+    background: none; color: var(--muted); font-weight: 500; font-size: 13px;
+    margin-top: 8px; padding: 4px; width: auto;
+  }
+  button.link:hover:not(:disabled) { background: none; color: var(--text); text-decoration: underline; }
+
+  .msg { margin-top: 16px; padding: 11px 14px; border-radius: 8px; font-size: 14px; display: none; }
+  .msg.show { display: block; }
+  .msg.error { background: var(--err-bg); border: 1px solid var(--err-line); color: var(--err-text); }
+  .msg.ok    { background: var(--ok-bg);  border: 1px solid var(--ok-line);  color: var(--ok-text); }
+  .msg.info  { background: #eef4ff; border: 1px solid #c3d7fb; color: #1b4a8f; }
+  .msg.warn  { background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--warn-text); }
+
+  .who {
+    display: flex; justify-content: space-between; align-items: center;
+    background: #f0f2f5; border-radius: 6px; padding: 8px 12px; font-size: 13px;
+  }
+  .detail { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 14px; display: none; }
+  .detail.show { display: block; }
+  .detail h2 { font-size: 12px; margin: 0 0 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+  dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; font-size: 13px; }
+  dt { color: var(--muted); }
+  dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
+  .step { display: none; }
+  .step.active { display: block; }
+  a.gotochat { display: block; text-align: center; margin-top: 10px; font-size: 13px; color: var(--msg2); }
+
+  .pagepick { margin-top: 14px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; display: none; }
+  .pagepick.show { display: block; }
+  .pagepick .item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 13px; cursor: pointer;
+  }
+  .pagepick .item:last-child { border-bottom: 0; }
+  .pagepick .item:hover { background: #f7f8fa; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">
+      <svg viewBox="0 0 24 24"><path d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.244c1.092.302 2.246.464 3.443.464 6.627 0 12-4.974 12-11.109C24 4.974 18.627 0 12 0zm1.191 14.963l-3.055-3.259-5.963 3.259L10.732 8l3.131 3.259L19.752 8l-6.561 6.963z"/></svg>
+    </div>
+    <h1>Connect Messenger</h1>
+    <p class="sub">Sign in to your account, then link a Facebook Page with Meta.</p>
+
+    <div class="steps-bar">
+      <div class="pill active" id="pill1">1 · Sign in</div>
+      <div class="pill" id="pill2">2 · Verify</div>
+      <div class="pill" id="pill3">3 · Meta</div>
+    </div>
+
+    <div class="step active" id="step1">
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username" placeholder="you@company.com" />
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" placeholder="Your password" />
+      <button id="btnLogin">Sign in</button>
+    </div>
+
+    <div class="step" id="step2">
+      <div class="who"><span>Signing in as <strong id="whoEmail"></strong></span></div>
+      <label for="code">Verification code</label>
+      <input id="code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code" />
+      <p class="hint">We emailed a code — it expires in 10 minutes.</p>
+      <button id="btnVerify">Verify &amp; continue</button>
+      <button class="link" id="btnBack">Use a different account</button>
+    </div>
+
+    <div class="step" id="step3">
+      <div class="who">
+        <span>Signed in as <strong id="whoName"></strong></span>
+        <button class="link" id="btnLogout" style="margin:0">Sign out</button>
+      </div>
+
+      <label for="business">Business</label>
+      <select id="business"></select>
+
+      <button id="btnConnect" disabled>
+        <svg viewBox="0 0 24 24"><path d="M24 12.07C24 5.4 18.63 0 12 0S0 5.4 0 12.07C0 18.1 4.39 23.1 10.13 24v-8.44H7.08v-3.49h3.05V9.41c0-3.02 1.79-4.69 4.53-4.69 1.31 0 2.68.24 2.68.24v2.96h-1.51c-1.49 0-1.96.93-1.96 1.89v2.26h3.33l-.53 3.49h-2.8V24C19.61 23.1 24 18.1 24 12.07z"/></svg>
+        <span id="btnText">Loading…</span>
+      </button>
+
+      <!-- Shown only when one login grants access to several Pages, so the
+           vendor can pick the right one. -->
+      <div id="pagepick" class="pagepick"></div>
+
+      <div id="detail" class="detail">
+        <h2>Page details</h2>
+        <dl id="detailList"></dl>
+      </div>
+
+      <a class="gotochat" id="gotoChat" href="/api/v1/messenger/chat" style="display:none">Open the Messenger inbox →</a>
+    </div>
+
+    <div id="msg" class="msg"></div>
+  </div>
+
+<script>
+(function () {
+  var API = window.location.origin;
+  // Must match a Valid OAuth Redirect URI in the Meta app settings exactly.
+  var REDIRECT_URI = API + '/api/v1/messenger/connect';
+
+  var qs = new URLSearchParams(window.location.search);
+
+  // ── Popup callback ────────────────────────────────────────────────────────
+  if (window.opener && (qs.get('code') || qs.get('error'))) {
+    window.opener.postMessage({
+      source: 'smm-msg-embedded-signup',
+      code: qs.get('code'),
+      error: qs.get('error_description') || qs.get('error')
+    }, API);
+    document.body.innerHTML = '<div class="card" style="text-align:center">Finishing up… you can close this window.</div>';
+    window.close();
+    return;
+  }
+
+  var cfg = null;
+  var auth = { token: null, user: null };
+  var popup = null;
+  var lastCode = null; // kept so a Page picker choice can re-submit without reopening the popup
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  function say(text, kind) {
+    var m = $('msg');
+    if (!text) { m.className = 'msg'; return; }
+    m.innerHTML = text;
+    m.className = 'msg show ' + (kind || 'info');
+  }
+  function setBtn(text, disabled) {
+    $('btnText').textContent = text;
+    $('btnConnect').disabled = !!disabled;
+  }
+  function showStep(n) {
+    [1, 2, 3].forEach(function (i) {
+      $('step' + i).className = 'step' + (i === n ? ' active' : '');
+      $('pill' + i).className = 'pill' + (i === n ? ' active' : (i < n ? ' done' : ''));
+    });
+    say('');
+  }
+  function post(path, body, token) {
+    var headers = { 'Content-Type': 'application/json' };
+    if (token) headers.Authorization = 'Bearer ' + token;
+    return fetch(API + path, { method: 'POST', headers: headers, body: JSON.stringify(body) })
+      .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); });
+  }
+
+  try {
+    var saved = JSON.parse(sessionStorage.getItem('smm_auth') || 'null');
+    if (saved && saved.token) auth = saved;
+  } catch (e) {}
+  function persist() { try { sessionStorage.setItem('smm_auth', JSON.stringify(auth)); } catch (e) {} }
+
+  // ── STEP 1 ────────────────────────────────────────────────────────────────
+  $('btnLogin').addEventListener('click', function () {
+    var email = $('email').value.trim(), password = $('password').value;
+    if (!email || !password) { say('Enter your email and password.', 'error'); return; }
+    this.disabled = true;
+    say('Checking your credentials…');
+
+    post('/auth/login', { email: email, password: password })
+      .then(function (res) {
+        $('btnLogin').disabled = false;
+        if (!res.ok) { say(res.body.message || 'Sign-in failed.', 'error'); return; }
+        $('whoEmail').textContent = email;
+        showStep(2);
+        say('We emailed a 6-digit code to ' + email + '.', 'info');
+        $('code').focus();
+      })
+      .catch(function (e) { $('btnLogin').disabled = false; say('Request failed: ' + e.message, 'error'); });
+  });
+
+  // ── STEP 2 ────────────────────────────────────────────────────────────────
+  $('btnVerify').addEventListener('click', function () {
+    var code = $('code').value.trim();
+    if (!code) { say('Enter the code from your email.', 'error'); return; }
+    this.disabled = true;
+    say('Verifying…');
+
+    post('/auth/verify-2fa', { email: $('email').value.trim(), code: code })
+      .then(function (res) {
+        $('btnVerify').disabled = false;
+        if (!res.ok) { say(res.body.message || 'Verification failed.', 'error'); return; }
+        auth = { token: res.body.token, user: res.body.user };
+        persist();
+        enterConnectStep();
+      })
+      .catch(function (e) { $('btnVerify').disabled = false; say('Request failed: ' + e.message, 'error'); });
+  });
+
+  $('btnBack').addEventListener('click', function () { showStep(1); });
+  $('btnLogout').addEventListener('click', function () {
+    auth = { token: null, user: null };
+    try { sessionStorage.removeItem('smm_auth'); } catch (e) {}
+    $('password').value = ''; $('code').value = '';
+    $('detail').className = 'detail';
+    showStep(1);
+  });
+
+  // ── STEP 3 ────────────────────────────────────────────────────────────────
+  function enterConnectStep() {
+    var u = auth.user || {};
+    $('whoName').textContent = u.name || u.email || 'you';
+
+    var sel = $('business');
+    sel.innerHTML = '';
+    var list = u.businesses || [];
+
+    if (!list.length) {
+      var o = document.createElement('option');
+      o.value = ''; o.textContent = 'No business on this account';
+      sel.appendChild(o); sel.disabled = true;
+      showStep(3);
+      setBtn('Cannot continue', true);
+      say('This account does not belong to any business, so there is nothing to link Messenger to.', 'warn');
+      return;
+    }
+
+    sel.disabled = false;
+    list.forEach(function (b) {
+      var o = document.createElement('option');
+      o.value = b.id;
+      o.textContent = b.name + (b.is_owner ? ' (owner)' : '');
+      sel.appendChild(o);
+    });
+
+    showStep(3);
+    loadSignupConfig();
+    showExisting();
+  }
+
+  $('business').addEventListener('change', function () {
+    $('detail').className = 'detail';
+    $('pagepick').className = 'pagepick';
+    $('gotoChat').style.display = 'none';
+    say('');
+    showExisting();
+  });
+
+  function showExisting() {
+    var bid = $('business').value;
+    if (!bid) return;
+    fetch(API + '/api/v1/messenger/account?business_id=' + encodeURIComponent(bid), {
+      headers: { Authorization: 'Bearer ' + auth.token }
+    })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (body) {
+        if (!body || !body.account) return;
+        var a = body.account;
+        render({
+          'Page name': a.page_name,
+          'Page ID': a.page_id,
+          'Status': a.account_status
+        });
+        say('Already connected. Signing in with Facebook again refreshes the stored token.', 'ok');
+        if (cfg && cfg.configured) setBtn('Reconnect with Facebook', false);
+        $('gotoChat').style.display = 'block';
+      })
+      .catch(function () {});
+  }
+
+  function render(obj) {
+    var dl = $('detailList');
+    dl.innerHTML = '';
+    Object.keys(obj).forEach(function (k) {
+      if (obj[k] === undefined || obj[k] === null || obj[k] === '') return;
+      var dt = document.createElement('dt'); dt.textContent = k;
+      var dd = document.createElement('dd'); dd.textContent = obj[k];
+      dl.appendChild(dt); dl.appendChild(dd);
+    });
+    $('detail').className = 'detail show';
+  }
+
+  function loadSignupConfig() {
+    if (cfg) { if (cfg.configured) setBtn('Continue with Facebook', false); return; }
+    fetch(API + '/api/v1/messenger/embedded-signup/config')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        cfg = data;
+        if (!data.configured) {
+          setBtn('Not configured', true);
+          say('<strong>Meta credentials are not set on the server.</strong><br>Missing: <code>META_APP_ID</code> / <code>META_MESSENGER_CONFIG_ID</code> (or <code>META_CONFIG_ID</code>)', 'warn');
+          return;
+        }
+        setBtn('Continue with Facebook', false);
+      })
+      .catch(function () { setBtn('Server unreachable', true); });
+  }
+
+  // ── Embedded Signup, without the JS SDK ───────────────────────────────────
+  function buildSignupUrl() {
+    var params = new URLSearchParams({
+      client_id: cfg.app_id,
+      config_id: cfg.config_id,
+      response_type: 'code',
+      override_default_response_type: 'true',
+      redirect_uri: REDIRECT_URI,
+      extras: JSON.stringify({ setup: {}, featureType: '', sessionInfoVersion: '3' })
+    });
+    return 'https://www.facebook.com/' + (cfg.graph_version || 'v21.0') +
+           '/dialog/oauth?' + params.toString();
+  }
+
+  $('btnConnect').addEventListener('click', function () {
+    var bid = $('business').value;
+    if (!bid) { say('Select a business first.', 'error'); return; }
+    if (!cfg || !cfg.configured) { say('Meta credentials are not configured.', 'error'); return; }
+
+    var w = 600, h = 760;
+    var left = window.screenX + (window.outerWidth - w) / 2;
+    var top = window.screenY + (window.outerHeight - h) / 2;
+
+    popup = window.open(buildSignupUrl(), 'msg_embedded_signup',
+      'width=' + w + ',height=' + h + ',left=' + left + ',top=' + top);
+
+    if (!popup) { say('Your browser blocked the popup. Allow popups for this site and try again.', 'error'); return; }
+    say('Complete the steps in the Facebook window — pick the Page you want to connect…');
+  });
+
+  window.addEventListener('message', function (event) {
+    if (event.origin !== API) return;
+    var d = event.data;
+    if (!d || d.source !== 'smm-msg-embedded-signup') return;
+
+    if (d.error) { say('Facebook returned: ' + d.error, 'error'); return; }
+    if (!d.code) { say('No authorization code was returned.', 'error'); return; }
+
+    lastCode = d.code;
+    submitCode(d.code, null);
+  });
+
+  function submitCode(code, pageId) {
+    setBtn('Saving…', true);
+    say('Linking your account…');
+    $('pagepick').className = 'pagepick';
+
+    post('/api/v1/messenger/embedded-signup', {
+      business_id: Number($('business').value),
+      code: code,
+      page_id: pageId || undefined,
+      redirect_uri: REDIRECT_URI
+    }, auth.token)
+      .then(function (res) {
+        setBtn('Reconnect with Facebook', false);
+        if (!res.ok) {
+          say((res.body.message || 'Connection failed.') +
+              (res.body.metaError ? '<br><small>' + (res.body.metaError.message || '') + '</small>' : ''), 'error');
+          return;
+        }
+
+        var a = res.body.account || {};
+        render({
+          'Page name': res.body.page_name,
+          'Page ID': a.page_id,
+          'Status': a.account_status
+        });
+        say('<strong>Connected.</strong> Your Facebook Page has been saved.', 'ok');
+        $('gotoChat').style.display = 'block';
+
+        var pages = res.body.available_pages || [];
+        if (pages.length > 1) {
+          renderPagePicker(pages, a.page_id);
+        }
+      })
+      .catch(function (e) { setBtn('Continue with Facebook', false); say('Request failed: ' + e.message, 'error'); });
+  }
+
+  function renderPagePicker(pages, activePageId) {
+    var box = $('pagepick');
+    box.innerHTML = '<div style="padding:8px 12px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--line)">This login can also connect:</div>';
+    pages.forEach(function (p) {
+      if (String(p.page_id) === String(activePageId)) return;
+      var row = document.createElement('div');
+      row.className = 'item';
+      row.innerHTML = '<span>' + p.page_name + '</span><span>Use this →</span>';
+      row.addEventListener('click', function () {
+        if (!lastCode) { say('Sign in with Facebook again to switch Pages.', 'warn'); return; }
+        submitCode(lastCode, p.page_id);
+      });
+      box.appendChild(row);
+    });
+    box.className = 'pagepick show';
+  }
+
+  if (auth.token && auth.user) enterConnectStep();
+})();
+</script>
+</body>
+</html>

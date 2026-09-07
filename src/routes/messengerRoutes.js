@@ -1,8 +1,10 @@
 'use strict';
 
 const express = require('express');
+const path = require('path');
 const router = express.Router();
 const messengerController = require('../controllers/messengerController');
+const messengerOnboardingController = require('../controllers/messengerOnboardingController');
 const authenticate = require('../middleware/authenticate');
 
 // ─── PUBLIC ROUTES (no JWT) ───────────────────────────────────────────────────
@@ -12,6 +14,29 @@ const authenticate = require('../middleware/authenticate');
 // The webhook itself now lives at the shared /api/v1/meta/webhook endpoint
 // (see metaWebhookRoutes.js) rather than here — Instagram and Messenger
 // deliver to that one Callback URL. WhatsApp keeps its own separate webhook.
+
+/**
+ * GET /api/v1/messenger/embedded-signup/config
+ * Public: app id + Facebook Login config id for the connect page popup.
+ */
+router.get('/embedded-signup/config', messengerOnboardingController.getConfig);
+
+/**
+ * GET /api/v1/messenger/connect
+ * Public: serves the vendor-facing Connect Messenger page.
+ */
+// router.get('/connect', (req, res) => {
+//   res.sendFile(path.join(__dirname, '../public/messenger-connect.html'));
+// });
+
+/**
+ * GET /api/v1/messenger/chat
+ * Public: serves the live chat / inbox page. The page itself signs in and
+ * calls the protected APIs with a JWT.
+ */
+// router.get('/chat', (req, res) => {
+//   res.sendFile(path.join(__dirname, '../public/messenger-chat.html'));
+// });
 
 // ─── JWT Auth Middleware ───────────────────────────────────────────────────────
 // Applied only to the routes defined AFTER this block.
@@ -32,6 +57,14 @@ router.get('/verify-credentials', messengerController.verifyCredentials);
  * Body: { business_id, page_id, access_token }
  */
 router.post('/account', messengerController.addAccount);
+
+/**
+ * POST /api/v1/messenger/embedded-signup
+ * Finish Embedded Signup: exchange code, subscribe the Page for messaging,
+ * and store it against the business.
+ * Body: { business_id, code, redirect_uri?, page_id? }
+ */
+router.post('/embedded-signup', messengerOnboardingController.completeSignup);
 
 /**
  * GET /api/v1/messenger/account?business_id=
