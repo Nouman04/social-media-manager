@@ -25,18 +25,18 @@ router.get('/embedded-signup/config', messengerOnboardingController.getConfig);
  * GET /api/v1/messenger/connect
  * Public: serves the vendor-facing Connect Messenger page.
  */
-// router.get('/connect', (req, res) => {
-//   res.sendFile(path.join(__dirname, '../public/messenger-connect.html'));
-// });
+router.get('/connect', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/messenger-connect.html'));
+});
 
 /**
  * GET /api/v1/messenger/chat
  * Public: serves the live chat / inbox page. The page itself signs in and
  * calls the protected APIs with a JWT.
  */
-// router.get('/chat', (req, res) => {
-//   res.sendFile(path.join(__dirname, '../public/messenger-chat.html'));
-// });
+router.get('/chat', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/messenger-chat.html'));
+});
 
 // ─── JWT Auth Middleware ───────────────────────────────────────────────────────
 // Applied only to the routes defined AFTER this block.
