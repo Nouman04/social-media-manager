@@ -17,6 +17,22 @@ const graphBase = (accessToken) =>
     ? `https://graph.instagram.com/${GRAPH_VERSION}`
     : `https://graph.facebook.com/${GRAPH_VERSION}`);
 
+const isInstagramLogin = (accessToken) => String(accessToken || '').startsWith('IGAA');
+
+// The node that owns the messaging edge differs per pipeline. Facebook Login
+// routes Instagram DMs through the linked Page, so it is /{page_id}/messages;
+// Instagram Login addresses the account directly, so it is /{ig_user_id}/...
+// Verified against the live API: /{ig_user_id}/conversations with a Page token
+// answers "(#3) Application does not have the capability", while /{page_id}/
+// conversations?platform=instagram returns the real threads.
+const messagingNodeId = (detail) =>
+  (isInstagramLogin(detail.access_token) ? detail.ig_user_id : detail.page_id);
+
+// Facebook Login addresses Instagram threads by an explicit platform filter;
+// on graph.instagram.com every thread is already Instagram.
+const messagingParams = (detail) =>
+  (isInstagramLogin(detail.access_token) ? {} : { platform: 'instagram' });
+
 const PLATFORM = 'instagram';
 
 // Instagram-scoped IDs are numeric strings.
@@ -117,10 +133,10 @@ const markFailed = async (record, errorCode, errorMessage) => {
  * @returns {Promise<string|null>} null when Meta has no thread for them yet.
  */
 const fetchSendId = async (detail, contactIgsid) => {
-  const url = `${graphBase(detail.access_token)}/${detail.ig_user_id}/conversations`;
+  const url = `${graphBase(detail.access_token)}/${messagingNodeId(detail)}/conversations`;
   const { data } = await axios.get(url, {
     ...buildConfig(detail.access_token),
-    params: { user_id: contactIgsid, fields: 'participants' },
+    params: { ...messagingParams(detail), user_id: contactIgsid, fields: 'participants' },
   });
 
   return pickContactId(data?.data?.[0]?.participants?.data, detail);
@@ -221,7 +237,7 @@ const dispatchMessage = async ({ businessId, toIgsid, messageType, messageBody, 
 
   const record = await createMessageRecord(conversation.id, toIgsid, messageType, payload, senderId, receiverId);
 
-  const url = `${graphBase(detail.access_token)}/${detail.ig_user_id}/messages`;
+  const url = `${graphBase(detail.access_token)}/${messagingNodeId(detail)}/messages`;
   try {
     const response = await axios.post(url, payload, buildConfig(detail.access_token));
     const mid = response.data?.message_id || null;
@@ -251,13 +267,16 @@ const instagramService = {
 
   /**
    * Verify Instagram credentials by fetching the professional account.
-   * GET https://graph.facebook.com/v18.0/{IG_USER_ID}
+   * GET {graphBase}/{IG_USER_ID}
    */
   verifyCredentials: async (igUserId, accessToken) => {
     const url = `${graphBase(accessToken)}/${igUserId}`;
-    // user_id is the messaging-scoped id Meta reports as sender/recipient.id on
-    // inbound webhooks — it comes back on this same call, so no extra request.
-    const params = { fields: 'id,user_id,username,name,profile_picture_url,followers_count,media_count' };
+    // Only the Instagram Login pipeline exposes user_id (the messaging-scoped
+    // id webhooks report). Asking the Facebook one for it fails the whole call
+    // with "(#100) Tried accessing nonexisting field (user_id)" — and it does
+    // not need the field anyway, since its webhooks carry ig_user_id.
+    const base = 'id,username,name,profile_picture_url,followers_count,media_count';
+    const params = { fields: isInstagramLogin(accessToken) ? `${base},user_id` : base };
     try {
       const response = await axios.get(url, { ...buildConfig(accessToken), params });
       return response.data;
@@ -497,7 +516,7 @@ const instagramService = {
       payload: { message_id: messageId, ...(unreact ? {} : { reaction }) },
     };
 
-    const url = `${graphBase(detail.access_token)}/${detail.ig_user_id}/messages`;
+    const url = `${graphBase(detail.access_token)}/${messagingNodeId(detail)}/messages`;
     try {
       const response = await axios.post(url, payload, buildConfig(detail.access_token));
       return response.data;
@@ -513,7 +532,7 @@ const instagramService = {
     const detail = await getTenantCredentials(businessId);
     const sendToId = await resolveSendId(detail, toIgsid);
     const payload = { recipient: { id: sendToId }, sender_action: 'mark_seen' };
-    const url = `${graphBase(detail.access_token)}/${detail.ig_user_id}/messages`;
+    const url = `${graphBase(detail.access_token)}/${messagingNodeId(detail)}/messages`;
     try {
       const response = await axios.post(url, payload, buildConfig(detail.access_token));
       return response.data;
