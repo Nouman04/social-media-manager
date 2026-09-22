@@ -6,6 +6,7 @@ const router = express.Router();
 const instagramController = require('../controllers/instagramController');
 const instagramOnboardingController = require('../controllers/instagramOnboardingController');
 const authenticate = require('../middleware/authenticate');
+const authorizeBusiness = require('../middleware/authorizeBusiness');
 
 // ─── PUBLIC ROUTES (no JWT) ───────────────────────────────────────────────────
 // Meta's servers call the webhook endpoints directly — they carry no auth
@@ -50,6 +51,13 @@ router.use(authenticate);
  * Verify Instagram credentials against the Graph API before connecting.
  */
 router.get('/verify-credentials', instagramController.verifyCredentials);
+
+// ─── Tenant Guard ─────────────────────────────────────────────────────────────
+// Every route below takes business_id from the request. Being signed in is not
+// the same as being entitled to that business, so check membership here rather
+// than trusting the caller's business_id. Declared after /verify-credentials,
+// which carries no business_id of its own.
+router.use(authorizeBusiness);
 
 /**
  * POST /api/v1/instagram/account

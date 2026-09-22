@@ -290,7 +290,25 @@ const instagramOnboardingService = {
     // 4. subscribe our app so inbound webhooks actually arrive
     await instagramOnboardingService.subscribePageForMessaging(page.id, pageAccessToken);
 
-    // 5. persist — upsert so reconnecting refreshes the token in place
+    // 5. resolve the messaging-scoped id. Inbound webhooks report this — not
+    // ig_user_id — as sender/recipient.id, so without it every message from
+    // this account is skipped as "No active tenant". Best-effort: if Meta
+    // won't hand it over, connect still succeeds and it can be set later via
+    // PUT /api/v1/instagram/account once a real event reveals it.
+    let igScopedId = null;
+    try {
+      const { data } = await axios.get(`${GRAPH_API_BASE}/${igAccount.id}`, {
+        params: { fields: 'user_id', access_token: pageAccessToken },
+      });
+      if (data?.user_id) igScopedId = String(data.user_id);
+    } catch (scopedErr) {
+      console.warn(
+        `[instagramOnboarding] Could not resolve ig_scoped_id for ${igAccount.id}: ` +
+        `${scopedErr?.response?.data?.error?.message || scopedErr.message}`
+      );
+    }
+
+    // 6. persist — upsert so reconnecting refreshes the token in place
     const values = {
       business_id: businessId,
       ig_user_id: igAccount.id,
@@ -299,6 +317,8 @@ const instagramOnboardingService = {
       access_token: pageAccessToken,
       is_active: true,
     };
+    // Never null out an id we already learned from a live webhook.
+    if (igScopedId) values.ig_scoped_id = igScopedId;
 
     let detail;
     if (clash) {

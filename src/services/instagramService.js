@@ -6,12 +6,17 @@ const { InstagramDetail, InstagramMessage, Conversation, Business } = require('.
 const { findOrCreateConversation, getPlatformId } = require('../helpers/conversationHelper');
 const realtime = require('../helpers/realtime');
 
-// Instagram's native-login messaging pipeline (the one actually confirmed
-// working for this app) is served from graph.instagram.com, not
-// graph.facebook.com — a Page access token from Facebook Login is rejected
-// outright here; this expects the IGAA-prefixed token from "API setup with
-// Instagram login" instead.
-const GRAPH_API_BASE = 'https://graph.instagram.com/v21.0';
+// Instagram messaging has two pipelines and each rejects the other's token:
+// "API setup with Instagram login" issues an IGAA-prefixed token served from
+// graph.instagram.com, while Embedded Signup (Facebook Login) issues a Page
+// token served from graph.facebook.com. Hard-coding either host breaks every
+// tenant connected through the other one, so derive it from the token itself.
+const GRAPH_VERSION = process.env.META_GRAPH_VERSION || 'v21.0';
+const graphBase = (accessToken) =>
+  (String(accessToken || '').startsWith('IGAA')
+    ? `https://graph.instagram.com/${GRAPH_VERSION}`
+    : `https://graph.facebook.com/${GRAPH_VERSION}`);
+
 const PLATFORM = 'instagram';
 
 // Instagram-scoped IDs are numeric strings.
@@ -105,16 +110,74 @@ const markFailed = async (record, errorCode, errorMessage) => {
 };
 
 /**
- * Resolve the conversation-scoped id Meta's send endpoint actually requires
- * for a contact, falling back to the webhook-scoped id (toIgsid) when it
- * hasn't been set yet — see Conversation.ig_send_id.
+ * Ask Meta for the conversation-scoped recipient id of a contact. It is only
+ * exposed as a participant on the thread itself, so the thread is fetched by
+ * the webhook-scoped id and the participant that isn't us is the answer.
+ *
+ * @returns {Promise<string|null>} null when Meta has no thread for them yet.
  */
-const resolveSendId = async (businessId, toIgsid) => {
+const fetchSendId = async (detail, contactIgsid) => {
+  const url = `${graphBase(detail.access_token)}/${detail.ig_user_id}/conversations`;
+  const { data } = await axios.get(url, {
+    ...buildConfig(detail.access_token),
+    params: { user_id: contactIgsid, fields: 'participants' },
+  });
+
+  return pickContactId(data?.data?.[0]?.participants?.data, detail);
+};
+
+/**
+ * Pick the contact out of a thread's participants — the one that is neither
+ * of the account's own ids. Pure, so it is covered by the self-check below.
+ */
+const pickContactId = (participants, detail) => {
+  const ours = new Set([String(detail.ig_user_id), String(detail.ig_scoped_id ?? '')]);
+  const contact = (participants || []).find((p) => p?.id && !ours.has(String(p.id)));
+  return contact ? String(contact.id) : null;
+};
+
+/**
+ * The conversation-scoped id POST /{ig_user_id}/messages requires, resolved
+ * from Meta on first use and cached on the conversation so later sends cost
+ * no extra call. Falls back to the webhook-scoped id when Meta won't give one
+ * — on the Facebook-Login pipeline that id is already the correct recipient.
+ */
+const ensureSendId = async (detail, conversation, toIgsid) => {
+  if (conversation.ig_send_id) return conversation.ig_send_id;
+
+  try {
+    const sendId = await fetchSendId(detail, toIgsid);
+    if (sendId) {
+      await conversation.update({ ig_send_id: sendId });
+      console.log(
+        `[instagramService.ensureSendId] Resolved | conversation=${conversation.id} | ${toIgsid} -> ${sendId}`
+      );
+      return sendId;
+    }
+    console.warn(
+      `[instagramService.ensureSendId] Meta returned no thread for ${toIgsid} — falling back to the webhook id.`
+    );
+  } catch (apiErr) {
+    console.warn(
+      `[instagramService.ensureSendId] Lookup failed for ${toIgsid}: ` +
+      `${apiErr?.response?.data?.error?.message || apiErr.message} — falling back to the webhook id.`
+    );
+  }
+
+  return toIgsid;
+};
+
+/**
+ * Same resolution for the endpoints that act on a contact without creating a
+ * conversation (reactions, read receipts).
+ */
+const resolveSendId = async (detail, toIgsid) => {
   const socialPlatformId = await getPlatformId(PLATFORM);
   const conversation = await Conversation.findOne({
-    where: { business_id: businessId, social_platform_id: socialPlatformId, contact_identifier: toIgsid },
+    where: { business_id: detail.business_id, social_platform_id: socialPlatformId, contact_identifier: toIgsid },
   });
-  return conversation?.ig_send_id || toIgsid;
+  if (!conversation) return toIgsid;
+  return ensureSendId(detail, conversation, toIgsid);
 };
 
 /**
@@ -146,19 +209,10 @@ const dispatchMessage = async ({ businessId, toIgsid, messageType, messageBody, 
     createdBy: senderId,
   });
 
-  // POST /{ig_user_id}/messages requires a conversation-scoped recipient id
-  // that is NOT the webhook-scoped id we key conversations on — Meta rejects
-  // the latter outright ("requested user cannot be found"). Until that id is
-  // resolved and cached on the conversation, fall back to toIgsid so the
-  // error that comes back is Meta's own rather than one we invented.
-  if (!conversation.ig_send_id) {
-    console.warn(
-      `[instagramService.dispatchMessage] conversation ${conversation.id} has no ig_send_id yet — ` +
-      `sending will likely fail. Look it up via GET /{ig_user_id}/conversations?fields=participants ` +
-      'and set it with PUT /api/v1/instagram/conversations/:id (or update the row directly).'
-    );
-  }
-  const sendToId = conversation.ig_send_id || toIgsid;
+  // POST /{ig_user_id}/messages wants a conversation-scoped recipient id, not
+  // the webhook-scoped id conversations are keyed on. Resolved from Meta on
+  // first send and cached, so no account needs it configured by hand.
+  const sendToId = await ensureSendId(detail, conversation, toIgsid);
 
   const payload = {
     recipient: { id: sendToId },
@@ -167,7 +221,7 @@ const dispatchMessage = async ({ businessId, toIgsid, messageType, messageBody, 
 
   const record = await createMessageRecord(conversation.id, toIgsid, messageType, payload, senderId, receiverId);
 
-  const url = `${GRAPH_API_BASE}/${detail.ig_user_id}/messages`;
+  const url = `${graphBase(detail.access_token)}/${detail.ig_user_id}/messages`;
   try {
     const response = await axios.post(url, payload, buildConfig(detail.access_token));
     const mid = response.data?.message_id || null;
@@ -200,8 +254,10 @@ const instagramService = {
    * GET https://graph.facebook.com/v18.0/{IG_USER_ID}
    */
   verifyCredentials: async (igUserId, accessToken) => {
-    const url = `${GRAPH_API_BASE}/${igUserId}`;
-    const params = { fields: 'id,username,name,profile_picture_url,followers_count,media_count' };
+    const url = `${graphBase(accessToken)}/${igUserId}`;
+    // user_id is the messaging-scoped id Meta reports as sender/recipient.id on
+    // inbound webhooks — it comes back on this same call, so no extra request.
+    const params = { fields: 'id,user_id,username,name,profile_picture_url,followers_count,media_count' };
     try {
       const response = await axios.get(url, { ...buildConfig(accessToken), params });
       return response.data;
@@ -238,6 +294,7 @@ const instagramService = {
       const detail = await InstagramDetail.create({
         business_id: businessId,
         ig_user_id,
+        ig_scoped_id: profile.user_id ? String(profile.user_id) : null,
         page_id,
         access_token,
         username: profile.username || null,
@@ -286,6 +343,9 @@ const instagramService = {
       const profile = await instagramService.verifyCredentials(detail.ig_user_id, access_token);
       updates.access_token = access_token;
       updates.username = profile.username || detail.username;
+      // Reconnect is also the repair path for accounts connected before
+      // ig_scoped_id was auto-populated. An explicit ig_scoped_id still wins.
+      if (profile.user_id && ig_scoped_id === undefined) updates.ig_scoped_id = String(profile.user_id);
     }
 
     if (Object.keys(updates).length === 0) {
@@ -318,7 +378,7 @@ const instagramService = {
    */
   getProfile: async (businessId) => {
     const detail = await getTenantCredentials(businessId);
-    const url = `${GRAPH_API_BASE}/${detail.ig_user_id}`;
+    const url = `${graphBase(detail.access_token)}/${detail.ig_user_id}`;
     const params = {
       fields: 'id,username,name,biography,website,profile_picture_url,followers_count,follows_count,media_count',
     };
@@ -336,7 +396,7 @@ const instagramService = {
    */
   getContactProfile: async (businessId, igsid) => {
     const detail = await getTenantCredentials(businessId);
-    const url = `${GRAPH_API_BASE}/${igsid}`;
+    const url = `${graphBase(detail.access_token)}/${igsid}`;
     const params = { fields: 'name,username,profile_pic,is_verified_user,follower_count' };
     try {
       const response = await axios.get(url, { ...buildConfig(detail.access_token), params });
@@ -429,7 +489,7 @@ const instagramService = {
    */
   sendReaction: async (businessId, toIgsid, messageId, reaction = 'love', unreact = false) => {
     const detail = await getTenantCredentials(businessId);
-    const sendToId = await resolveSendId(businessId, toIgsid);
+    const sendToId = await resolveSendId(detail, toIgsid);
 
     const payload = {
       recipient: { id: sendToId },
@@ -437,7 +497,7 @@ const instagramService = {
       payload: { message_id: messageId, ...(unreact ? {} : { reaction }) },
     };
 
-    const url = `${GRAPH_API_BASE}/${detail.ig_user_id}/messages`;
+    const url = `${graphBase(detail.access_token)}/${detail.ig_user_id}/messages`;
     try {
       const response = await axios.post(url, payload, buildConfig(detail.access_token));
       return response.data;
@@ -451,9 +511,9 @@ const instagramService = {
    */
   markSeen: async (businessId, toIgsid) => {
     const detail = await getTenantCredentials(businessId);
-    const sendToId = await resolveSendId(businessId, toIgsid);
+    const sendToId = await resolveSendId(detail, toIgsid);
     const payload = { recipient: { id: sendToId }, sender_action: 'mark_seen' };
-    const url = `${GRAPH_API_BASE}/${detail.ig_user_id}/messages`;
+    const url = `${graphBase(detail.access_token)}/${detail.ig_user_id}/messages`;
     try {
       const response = await axios.post(url, payload, buildConfig(detail.access_token));
       return response.data;
@@ -778,5 +838,10 @@ const instagramService = {
     }
   },
 };
+
+// Exposed for the self-check in test/instagram-ids.test.js — the id routing
+// these two decide is what silently drops or misroutes a tenant's messages.
+instagramService._graphBase = graphBase;
+instagramService._pickContactId = pickContactId;
 
 module.exports = instagramService;
