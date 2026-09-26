@@ -699,11 +699,29 @@ const instagramService = {
           continue;
         }
 
+        // ig_scoped_id has no discovery API — Meta only reveals it as
+        // sender/recipient.id on an account's first inbound webhook. So when the
+        // id matches no account, auto-adopt it onto the sole active account that
+        // is still missing one (unambiguous by construction: the app only
+        // receives events for accounts connected to it). With two or more
+        // accounts awaiting their first event we can't tell them apart, so we
+        // leave it for a manual set rather than risk mislinking a tenant.
+        if (!detail) {
+          detail = await instagramService._adoptScopedId(accountId);
+          if (detail) {
+            console.log(
+              `[instagramService.processWebhookEvent] Auto-linked ig_scoped_id ${accountId} ` +
+              `to business=${detail.business_id} (${detail.username || 'unknown'}).`
+            );
+          }
+        }
+
         if (!detail) {
           console.warn(
             `[instagramService.processWebhookEvent] No active tenant for id: ${accountId}. ` +
-            'If this is a newly connected account, its ig_scoped_id has likely never been observed yet — ' +
-            'set InstagramDetail.ig_scoped_id to this id once you confirm which business it belongs to.'
+            'Either no account is connected for it, or more than one connected account is still ' +
+            'awaiting its first webhook (ambiguous) — set InstagramDetail.ig_scoped_id manually via ' +
+            'PUT /api/v1/instagram/account once you confirm which business it belongs to.'
           );
           result.skipped++;
           continue;
@@ -739,6 +757,32 @@ const instagramService = {
   // ══════════════════════════════════════════════════════════════════════════
   //  PRIVATE — INTERNAL HANDLERS
   // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Adopt a webhook-scoped account id onto the one active account that is still
+   * missing its ig_scoped_id, and return it (with its business) so the caller
+   * can keep processing the same event. Returns null when the mapping would be
+   * ambiguous — zero candidates, two or more candidates, or the id is already
+   * taken by another row — in which case the caller falls back to skipping.
+   * See the caller for why a single candidate is safe to claim automatically.
+   */
+  _adoptScopedId: async (accountId) => {
+    const candidates = await InstagramDetail.findAll({
+      where: { ig_scoped_id: null, is_active: true },
+      include: [{ model: Business, as: 'business', attributes: ['id', 'name', 'created_by'] }],
+    });
+    if (candidates.length !== 1) return null;
+
+    const detail = candidates[0];
+    try {
+      await detail.update({ ig_scoped_id: String(accountId) });
+      return detail;
+    } catch (dbErr) {
+      // ig_scoped_id is UNIQUE; a race or a stale id already in use lands here.
+      if (dbErr?.name === 'SequelizeUniqueConstraintError') return null;
+      throw dbErr;
+    }
+  },
 
   /**
    * Persist an inbound Direct message against its conversation.
