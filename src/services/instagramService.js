@@ -668,86 +668,23 @@ const instagramService = {
     }
 
     for (const entry of entries) {
+      // Direct messages arrive either under entry[].messaging[] (classic
+      // Messenger shape) or, on the current Instagram API, under
+      // entry[].changes[] with field "messages" whose `value` carries the same
+      // sender / recipient / message fields. Route both through one path.
       const events = Array.isArray(entry?.messaging) ? entry.messaging : [];
-
       for (const event of events) {
-        // For inbound, recipient.id is our account; for echoes it's the contact.
-        const isEcho = Boolean(event?.message?.is_echo);
-        const accountId = isEcho ? event?.sender?.id : event?.recipient?.id;
-        const contactId = isEcho ? event?.recipient?.id : event?.sender?.id;
-
-        if (!accountId || !contactId) {
-          result.skipped++;
-          continue;
-        }
-
-        let detail;
-        try {
-          // accountId is whatever Meta's current messaging system reports on
-          // the event — that's ig_scoped_id, not ig_user_id (the classic id
-          // only matters for the send URL). Matching both keeps this working
-          // regardless of which one a given payload happens to carry.
-          detail = await InstagramDetail.findOne({
-            where: {
-              [Op.or]: [{ ig_user_id: String(accountId) }, { ig_scoped_id: String(accountId) }],
-              is_active: true,
-            },
-            include: [{ model: Business, as: 'business', attributes: ['id', 'name', 'created_by'] }],
-          });
-        } catch (dbErr) {
-          result.errors.push({ accountId, error: dbErr.message });
-          continue;
-        }
-
-        // ig_scoped_id has no discovery API — Meta only reveals it as
-        // sender/recipient.id on an account's first inbound webhook. So when the
-        // id matches no account, auto-adopt it onto the sole active account that
-        // is still missing one (unambiguous by construction: the app only
-        // receives events for accounts connected to it). With two or more
-        // accounts awaiting their first event we can't tell them apart, so we
-        // leave it for a manual set rather than risk mislinking a tenant.
-        if (!detail) {
-          detail = await instagramService._adoptScopedId(accountId);
-          if (detail) {
-            console.log(
-              `[instagramService.processWebhookEvent] Auto-linked ig_scoped_id ${accountId} ` +
-              `to business=${detail.business_id} (${detail.username || 'unknown'}).`
-            );
-          }
-        }
-
-        if (!detail) {
-          console.warn(
-            `[instagramService.processWebhookEvent] No active tenant for id: ${accountId}. ` +
-            'Either no account is connected for it, or more than one connected account is still ' +
-            'awaiting its first webhook (ambiguous) — set InstagramDetail.ig_scoped_id manually via ' +
-            'PUT /api/v1/instagram/account once you confirm which business it belongs to.'
-          );
-          result.skipped++;
-          continue;
-        }
-
-        try {
-          if (event.message && !isEcho) {
-            await instagramService._handleInboundMessage(detail, contactId, event);
-            result.processed++;
-          } else if (event.read || event.delivery) {
-            await instagramService._handleStatusUpdate(detail, event);
-            result.processed++;
-          } else {
-            result.skipped++;
-          }
-        } catch (handlerErr) {
-          console.error('[instagramService.processWebhookEvent] Handler error:', handlerErr.message);
-          result.errors.push({ accountId, error: handlerErr.message });
-        }
+        await instagramService._routeMessagingEvent(event, result);
       }
 
-      // Comment / mention / story-insight events arrive under `changes`.
       const changes = Array.isArray(entry?.changes) ? entry.changes : [];
       for (const change of changes) {
-        console.log(`[WEBHOOK][IG] Unhandled change field="${change.field}" — logged only.`);
-        result.skipped++;
+        if (change?.field === 'messages' && change?.value) {
+          await instagramService._routeMessagingEvent(change.value, result);
+        } else {
+          console.log(`[WEBHOOK][IG] Unhandled change field="${change?.field}" — logged only.`);
+          result.skipped++;
+        }
       }
     }
 
@@ -757,6 +694,83 @@ const instagramService = {
   // ══════════════════════════════════════════════════════════════════════════
   //  PRIVATE — INTERNAL HANDLERS
   // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Route one inbound messaging event to the owning tenant and persist it.
+   * Shared by both webhook shapes — entry.messaging[] events and the value of
+   * an entry.changes[] entry whose field is "messages" — since both carry the
+   * same sender / recipient / message fields.
+   */
+  _routeMessagingEvent: async (event, result) => {
+    // For inbound, recipient.id is our account; for echoes it's the contact.
+    const isEcho = Boolean(event?.message?.is_echo);
+    const accountId = isEcho ? event?.sender?.id : event?.recipient?.id;
+    const contactId = isEcho ? event?.recipient?.id : event?.sender?.id;
+
+    if (!accountId || !contactId) {
+      result.skipped++;
+      return;
+    }
+
+    let detail;
+    try {
+      // accountId is whatever Meta's current messaging system reports on the
+      // event — that's ig_scoped_id, not ig_user_id (the classic id only
+      // matters for the send URL). Matching both keeps this working regardless
+      // of which one a given payload happens to carry.
+      detail = await InstagramDetail.findOne({
+        where: {
+          [Op.or]: [{ ig_user_id: String(accountId) }, { ig_scoped_id: String(accountId) }],
+          is_active: true,
+        },
+        include: [{ model: Business, as: 'business', attributes: ['id', 'name', 'created_by'] }],
+      });
+    } catch (dbErr) {
+      result.errors.push({ accountId, error: dbErr.message });
+      return;
+    }
+
+    // ig_scoped_id has no discovery API — Meta only reveals it as
+    // sender/recipient.id on an account's first inbound webhook. When the id
+    // matches no account, auto-adopt it onto the sole active account still
+    // missing one; with two or more awaiting we can't tell them apart, so leave
+    // it for a manual set rather than risk mislinking a tenant.
+    if (!detail) {
+      detail = await instagramService._adoptScopedId(accountId);
+      if (detail) {
+        console.log(
+          `[instagramService.processWebhookEvent] Auto-linked ig_scoped_id ${accountId} ` +
+          `to business=${detail.business_id} (${detail.username || 'unknown'}).`
+        );
+      }
+    }
+
+    if (!detail) {
+      console.warn(
+        `[instagramService.processWebhookEvent] No active tenant for id: ${accountId}. ` +
+        'Either no account is connected for it, or more than one connected account is still ' +
+        'awaiting its first webhook (ambiguous) — set InstagramDetail.ig_scoped_id manually via ' +
+        'PUT /api/v1/instagram/account once you confirm which business it belongs to.'
+      );
+      result.skipped++;
+      return;
+    }
+
+    try {
+      if (event.message && !isEcho) {
+        await instagramService._handleInboundMessage(detail, contactId, event);
+        result.processed++;
+      } else if (event.read || event.delivery) {
+        await instagramService._handleStatusUpdate(detail, event);
+        result.processed++;
+      } else {
+        result.skipped++;
+      }
+    } catch (handlerErr) {
+      console.error('[instagramService.processWebhookEvent] Handler error:', handlerErr.message);
+      result.errors.push({ accountId, error: handlerErr.message });
+    }
+  },
 
   /**
    * Adopt a webhook-scoped account id onto the one active account that is still
