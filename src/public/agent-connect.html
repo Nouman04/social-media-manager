@@ -1,0 +1,900 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI Agent Connect — SMM</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:        #0f1117;
+    --card:      #1a1d27;
+    --card2:     #20243a;
+    --surface:   #252840;
+    --border:    #2e3250;
+    --text:      #e8eaf6;
+    --muted:     #8b8fa8;
+    --accent:    #6c63ff;
+    --accent2:   #a78bfa;
+    --accent-g:  linear-gradient(135deg,#6c63ff,#a78bfa);
+    --green:     #10b981;
+    --red:       #f87171;
+    --yellow:    #fbbf24;
+    --shadow:    0 8px 32px rgba(0,0,0,.45);
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', system-ui, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+    background-image:
+      radial-gradient(ellipse 80% 60% at 50% -10%, rgba(108,99,255,.25), transparent),
+      radial-gradient(ellipse 60% 50% at 90% 80%, rgba(167,139,250,.12), transparent);
+  }
+
+  /* ── Layout ── */
+  .shell {
+    width: 100%;
+    max-width: 520px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  /* ── Header ── */
+  .header {
+    text-align: center;
+    margin-bottom: 28px;
+  }
+  .logo-ring {
+    width: 62px;
+    height: 62px;
+    border-radius: 18px;
+    background: var(--accent-g);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 14px;
+    box-shadow: 0 0 30px rgba(108,99,255,.5);
+    animation: pulse-ring 3s ease-in-out infinite;
+  }
+  @keyframes pulse-ring {
+    0%,100% { box-shadow: 0 0 20px rgba(108,99,255,.4); }
+    50%      { box-shadow: 0 0 40px rgba(108,99,255,.7); }
+  }
+  .logo-ring svg { width: 34px; height: 34px; fill: #fff; }
+  .header h1 { font-size: 24px; font-weight: 700; letter-spacing: -.3px; }
+  .header p  { color: var(--muted); font-size: 14px; margin-top: 6px; }
+
+  /* ── Progress pills ── */
+  .pills {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+  .pill {
+    flex: 1;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 7px 4px;
+    border-radius: 20px;
+    background: var(--surface);
+    color: var(--muted);
+    border: 1px solid var(--border);
+    transition: all .3s;
+  }
+  .pill.active {
+    background: var(--accent-g);
+    color: #fff;
+    border-color: transparent;
+    box-shadow: 0 0 14px rgba(108,99,255,.5);
+  }
+  .pill.done {
+    background: rgba(16,185,129,.15);
+    color: var(--green);
+    border-color: rgba(16,185,129,.35);
+  }
+
+  /* ── Card ── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px 26px;
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(12px);
+  }
+
+  /* ── Form elements ── */
+  label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    letter-spacing: .5px;
+    text-transform: uppercase;
+    margin: 18px 0 6px;
+  }
+  input, select, textarea {
+    width: 100%;
+    padding: 11px 14px;
+    font-size: 14px;
+    font-family: inherit;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    outline: none;
+    transition: border-color .2s, box-shadow .2s;
+    resize: vertical;
+  }
+  input:focus, select:focus, textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(108,99,255,.18);
+  }
+  input::placeholder, textarea::placeholder { color: var(--muted); }
+  select option { background: var(--card); }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 5px; line-height: 1.5; }
+
+  /* ── Buttons ── */
+  .btn {
+    width: 100%;
+    margin-top: 20px;
+    padding: 13px 16px;
+    font-size: 15px;
+    font-weight: 600;
+    font-family: inherit;
+    color: #fff;
+    background: var(--accent-g);
+    border: 0;
+    border-radius: 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    transition: opacity .2s, transform .15s;
+    box-shadow: 0 4px 18px rgba(108,99,255,.4);
+  }
+  .btn:hover:not(:disabled) { opacity: .9; transform: translateY(-1px); }
+  .btn:active:not(:disabled) { transform: translateY(0); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+  .btn svg { width: 18px; height: 18px; fill: #fff; flex-shrink: 0; }
+
+  .btn-ghost {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    box-shadow: none;
+    margin-top: 10px;
+    font-size: 13px;
+    padding: 10px;
+  }
+  .btn-ghost:hover:not(:disabled) { border-color: var(--accent); color: var(--text); background: transparent; }
+
+  .btn-sm {
+    width: auto;
+    margin-top: 10px;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: 8px;
+    box-shadow: none;
+  }
+
+  /* ── Alert banner ── */
+  .alert {
+    margin-top: 16px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    font-size: 13px;
+    line-height: 1.55;
+    display: none;
+    animation: fadein .25s ease;
+  }
+  @keyframes fadein { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
+  .alert.show { display: block; }
+  .alert.error { background: rgba(248,113,113,.12); border: 1px solid rgba(248,113,113,.3); color: #fca5a5; }
+  .alert.ok    { background: rgba(16,185,129,.12);  border: 1px solid rgba(16,185,129,.35);  color: #6ee7b7; }
+  .alert.info  { background: rgba(108,99,255,.12);  border: 1px solid rgba(108,99,255,.3);   color: #c4b5fd; }
+  .alert.warn  { background: rgba(251,191,36,.1);   border: 1px solid rgba(251,191,36,.3);   color: #fde68a; }
+
+  /* ── Badge row ── */
+  .who-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13px;
+    margin-bottom: 4px;
+  }
+  .who-row strong { color: var(--text); }
+  .who-row button {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 12px;
+    cursor: pointer;
+    font-family: inherit;
+    padding: 0;
+  }
+  .who-row button:hover { color: var(--red); }
+
+  /* ── Steps ── */
+  .step { display: none; }
+  .step.active { display: block; animation: fadein .3s ease; }
+
+  /* ── Section heading ── */
+  .sec-heading {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    letter-spacing: .8px;
+    text-transform: uppercase;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* ── Status badge ── */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 20px;
+  }
+  .badge.connected { background: rgba(16,185,129,.15); color: var(--green); border: 1px solid rgba(16,185,129,.3); }
+  .badge.disconnected { background: rgba(248,113,113,.12); color: #fca5a5; border: 1px solid rgba(248,113,113,.25); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  /* ── Key input row ── */
+  .key-row { display: flex; gap: 8px; }
+  .key-row input { flex: 1; }
+  .key-row .btn-sm { margin-top: 0; }
+
+  /* ── Chat page ── */
+  .chat-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+  }
+  .chat-model-tag {
+    font-size: 11px;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 3px 10px;
+    border-radius: 20px;
+  }
+
+  #chatbox {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    height: 380px;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    scroll-behavior: smooth;
+  }
+  #chatbox::-webkit-scrollbar { width: 5px; }
+  #chatbox::-webkit-scrollbar-track { background: transparent; }
+  #chatbox::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  .bubble-wrap {
+    display: flex;
+    flex-direction: column;
+    max-width: 82%;
+    gap: 3px;
+    animation: fadein .2s ease;
+  }
+  .bubble-wrap.user  { align-self: flex-end; align-items: flex-end; }
+  .bubble-wrap.agent { align-self: flex-start; align-items: flex-start; }
+
+  .bubble {
+    padding: 10px 14px;
+    border-radius: 14px;
+    font-size: 14px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .bubble-wrap.user  .bubble {
+    background: var(--accent-g);
+    color: #fff;
+    border-bottom-right-radius: 4px;
+  }
+  .bubble-wrap.agent .bubble {
+    background: var(--card2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-bottom-left-radius: 4px;
+  }
+  .bubble-meta { font-size: 10px; color: var(--muted); padding: 0 2px; }
+
+  .typing-dots span {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+    margin: 0 2px;
+    animation: blink 1.2s infinite both;
+  }
+  .typing-dots span:nth-child(2) { animation-delay:.2s; }
+  .typing-dots span:nth-child(3) { animation-delay:.4s; }
+  @keyframes blink { 0%,80%,100%{opacity:.2} 40%{opacity:1} }
+
+  .chat-input-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 12px;
+    align-items: flex-end;
+  }
+  .chat-input-row textarea {
+    flex: 1;
+    resize: none;
+    height: 46px;
+    padding: 12px 14px;
+    font-size: 14px;
+    border-radius: 12px;
+    line-height: 1.4;
+    transition: height .1s;
+  }
+  .send-btn {
+    flex-shrink: 0;
+    width: 46px;
+    height: 46px;
+    border-radius: 12px;
+    background: var(--accent-g);
+    border: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: opacity .2s, transform .15s;
+    box-shadow: 0 3px 12px rgba(108,99,255,.4);
+    margin-top: 0;
+    padding: 0;
+  }
+  .send-btn:hover:not(:disabled) { opacity: .9; transform: translateY(-1px); }
+  .send-btn:disabled { opacity: .4; cursor: not-allowed; }
+  .send-btn svg { width: 20px; height: 20px; fill: #fff; }
+
+  .chat-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+  .chat-actions button {
+    font-size: 12px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+    font-family: inherit;
+    transition: all .2s;
+  }
+  .chat-actions button:hover { border-color: var(--accent); color: var(--text); }
+
+  /* ── Usage pill ── */
+  .usage-row { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+  .usage-chip {
+    font-size: 11px;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    border-radius: 20px;
+  }
+  .usage-chip strong { color: var(--accent2); }
+
+  /* ── Empty state ── */
+  .empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: var(--muted);
+    font-size: 14px;
+    text-align: center;
+    padding: 24px 0;
+  }
+  .empty-state svg { width: 40px; height: 40px; opacity: .35; fill: var(--muted); }
+</style>
+</head>
+<body>
+<div class="shell">
+  <!-- Header -->
+  <div class="header">
+    <div class="logo-ring">
+      <svg viewBox="0 0 24 24"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 0 2h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1 0-2h1a7 7 0 0 1 7-7h1V5.73A2 2 0 0 1 10 4a2 2 0 0 1 2-2zm0 7a5 5 0 0 0-5 5v3h10v-3a5 5 0 0 0-5-5z"/></svg>
+    </div>
+    <h1>AI Agent</h1>
+    <p>Connect OpenRouter, set your prompt, and start chatting</p>
+  </div>
+
+  <!-- Progress pills -->
+  <div class="pills">
+    <div class="pill active" id="pill1">1 · Sign in</div>
+    <div class="pill"        id="pill2">2 · Settings</div>
+    <div class="pill"        id="pill3">3 · Chat</div>
+  </div>
+
+  <!-- Card -->
+  <div class="card">
+
+    <!-- ═══ STEP 1: Login ═══ -->
+    <div class="step active" id="step1">
+      <div class="sec-heading">Sign in to your account</div>
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username" placeholder="you@company.com" />
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" placeholder="Your password" />
+      <button class="btn" id="btnLogin">
+        <svg viewBox="0 0 24 24"><path d="M11 7L9.6 8.4l2.6 2.6H2v2h10.2l-2.6 2.6L11 17l5-5-5-5zm9 12h-8v2h8c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-8v2h8v14z"/></svg>
+        Sign in
+      </button>
+    </div>
+
+    <!-- ═══ STEP 1b: 2FA ═══ -->
+    <div class="step" id="step1b">
+      <div class="who-row">
+        <span>Signing in as <strong id="whoEmail"></strong></span>
+        <button onclick="showStep('step1')">Change</button>
+      </div>
+      <div class="sec-heading" style="margin-top:16px">Two-factor verification</div>
+      <label for="code">Verification code</label>
+      <input id="code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code" />
+      <p class="hint">Check your email — the code expires in 10 minutes.</p>
+      <button class="btn" id="btnVerify">
+        <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>
+        Verify &amp; continue
+      </button>
+    </div>
+
+    <!-- ═══ STEP 2: Agent Settings ═══ -->
+    <div class="step" id="step2">
+      <div class="who-row">
+        <span>Signed in as <strong id="whoName"></strong></span>
+        <button id="btnLogout">Sign out</button>
+      </div>
+
+      <div class="sec-heading" style="margin-top:16px">Agent Configuration</div>
+
+      <label for="business">Business</label>
+      <select id="business"></select>
+
+      <label>OpenRouter API Key</label>
+      <div class="key-row">
+        <input id="apiKey" type="password" placeholder="sk-or-v1-…" autocomplete="off" />
+        <button class="btn btn-sm" id="btnVerifyKey">Verify</button>
+      </div>
+      <p class="hint">Your key is stored server-side. Get it at <a href="https://openrouter.ai/keys" target="_blank" style="color:var(--accent2)">openrouter.ai/keys</a></p>
+
+      <label for="modelSelect">Model</label>
+      <select id="modelSelect"></select>
+
+      <label for="systemPrompt">System Prompt</label>
+      <textarea id="systemPrompt" rows="4" placeholder="You are a helpful assistant for our business. Be concise, professional, and friendly."></textarea>
+      <p class="hint">This is sent as the system message at the start of every chat.</p>
+
+      <button class="btn" id="btnSaveSettings">
+        <svg viewBox="0 0 24 24"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>
+        Save &amp; go to Chat
+      </button>
+      <button class="btn btn-ghost" id="btnSkipToChat">Continue to Chat without saving</button>
+    </div>
+
+    <!-- ═══ STEP 3: Chat ═══ -->
+    <div class="step" id="step3">
+      <div class="chat-header">
+        <div class="sec-heading" style="margin-bottom:0;border-bottom:none">Live Chat</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="chat-model-tag" id="chatModelTag">—</span>
+          <span class="badge disconnected" id="agentBadge"><span class="dot"></span><span id="badgeLabel">No Key</span></span>
+        </div>
+      </div>
+
+      <div id="chatbox">
+        <div class="empty-state" id="emptyState">
+          <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+          <span>Send a message to get started</span>
+        </div>
+      </div>
+
+      <div class="chat-input-row">
+        <textarea id="chatInput" placeholder="Type your message… (Enter to send, Shift+Enter for new line)" rows="1"></textarea>
+        <button class="send-btn" id="btnSend" title="Send">
+          <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        </button>
+      </div>
+
+      <div class="chat-actions">
+        <button id="btnClearChat">🗑 Clear chat</button>
+        <button id="btnGoSettings">⚙ Settings</button>
+        <div class="usage-row" id="usageRow" style="display:none"></div>
+      </div>
+    </div>
+
+    <!-- Global alert -->
+    <div class="alert" id="alert"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var API  = window.location.origin;
+  var auth = { token: null, user: null };
+  var currentBid = null;
+  var chatHistory = [];
+  var agentReady  = false;
+
+  // ── helpers ────────────────────────────────────────────────────────────────
+  var $ = function (id) { return document.getElementById(id); };
+
+  function say(text, kind) {
+    var el = $('alert');
+    if (!text) { el.className = 'alert'; return; }
+    el.innerHTML = text;
+    el.className = 'alert show ' + (kind || 'info');
+  }
+
+  function showStep(id) {
+    ['step1','step1b','step2','step3'].forEach(function (s) {
+      $(s).className = 'step' + (s === id ? ' active' : '');
+    });
+    var stepNum = { step1:1, step1b:1, step2:2, step3:3 }[id] || 1;
+    [1,2,3].forEach(function (i) {
+      $('pill' + i).className = 'pill' + (i === stepNum ? ' active' : (i < stepNum ? ' done' : ''));
+    });
+    say('');
+  }
+
+  function persist() {
+    try { sessionStorage.setItem('smm_auth', JSON.stringify(auth)); } catch(e){}
+  }
+  function clearAuth() {
+    auth = { token: null, user: null };
+    try { sessionStorage.removeItem('smm_auth'); } catch(e){}
+  }
+
+  function request(method, path, body, token) {
+    var opts = {
+      method: method,
+      headers: { 'Content-Type': 'application/json' }
+    };
+    if (token) opts.headers['Authorization'] = 'Bearer ' + token;
+    if (body)  opts.body = JSON.stringify(body);
+    return fetch(API + path, opts)
+      .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, status: r.status, body: b }; }); });
+  }
+
+  // ── restore session ────────────────────────────────────────────────────────
+  try {
+    var saved = JSON.parse(sessionStorage.getItem('smm_auth') || 'null');
+    if (saved && saved.token) auth = saved;
+  } catch(e){}
+
+  // ── STEP 1: Login ──────────────────────────────────────────────────────────
+  $('btnLogin').addEventListener('click', function () {
+    var email = $('email').value.trim();
+    var pass  = $('password').value;
+    if (!email || !pass) { say('Enter your email and password.', 'error'); return; }
+    this.disabled = true; say('Signing in…');
+
+    request('POST', '/auth/login', { email: email, password: pass })
+      .then(function (res) {
+        $('btnLogin').disabled = false;
+        if (!res.ok) { say(res.body.message || 'Sign-in failed.', 'error'); return; }
+        $('whoEmail').textContent = email;
+        showStep('step1b');
+        say('A 6-digit code has been sent to ' + email + '.', 'info');
+        $('code').focus();
+      })
+      .catch(function (e) { $('btnLogin').disabled = false; say('Request failed: ' + e.message, 'error'); });
+  });
+
+  // ── STEP 1b: 2FA ──────────────────────────────────────────────────────────
+  $('btnVerify').addEventListener('click', function () {
+    var code = $('code').value.trim();
+    if (!code) { say('Enter the 6-digit code.', 'error'); return; }
+    this.disabled = true; say('Verifying…');
+
+    request('POST', '/auth/verify-2fa', { email: $('email').value.trim(), code: code })
+      .then(function (res) {
+        $('btnVerify').disabled = false;
+        if (!res.ok) { say(res.body.message || 'Verification failed.', 'error'); return; }
+        auth = { token: res.body.token, user: res.body.user };
+        persist();
+        enterSettings();
+      })
+      .catch(function (e) { $('btnVerify').disabled = false; say('Request failed: ' + e.message, 'error'); });
+  });
+
+  // ── STEP 2: Settings ──────────────────────────────────────────────────────
+  function enterSettings() {
+    var u = auth.user || {};
+    $('whoName').textContent = u.name || u.email || 'you';
+
+    var sel  = $('business');
+    var list = u.businesses || [];
+    sel.innerHTML = '';
+
+    if (!list.length) {
+      var o = document.createElement('option');
+      o.value = ''; o.textContent = 'No business on this account';
+      sel.appendChild(o); sel.disabled = true;
+    } else {
+      sel.disabled = false;
+      list.forEach(function (b) {
+        var o = document.createElement('option');
+        o.value = b.id;
+        o.textContent = b.name + (b.is_owner ? ' (owner)' : '');
+        sel.appendChild(o);
+      });
+    }
+
+    showStep('step2');
+    loadSettingsForBusiness();
+  }
+
+  $('business').addEventListener('change', loadSettingsForBusiness);
+
+  function loadSettingsForBusiness() {
+    var bid = $('business').value;
+    if (!bid) return;
+    currentBid = Number(bid);
+
+    request('GET', '/api/v1/agent/settings?business_id=' + bid, null, auth.token)
+      .then(function (res) {
+        if (!res.ok) return;
+        var d = res.body.data || {};
+
+        // populate model dropdown
+        var ms = $('modelSelect');
+        ms.innerHTML = '';
+        (d.available_models || []).forEach(function (m) {
+          var o = document.createElement('option');
+          o.value = m.id; o.textContent = m.label;
+          if (m.id === d.model) o.selected = true;
+          ms.appendChild(o);
+        });
+
+        $('systemPrompt').value = d.system_prompt || '';
+        if (d.has_api_key) {
+          say('API key already saved. You can update it or leave blank to keep the existing one.', 'info');
+        }
+      })
+      .catch(function () {});
+  }
+
+  // Verify key button
+  $('btnVerifyKey').addEventListener('click', function () {
+    var key = $('apiKey').value.trim();
+    if (!key) { say('Enter an API key to verify.', 'error'); return; }
+    this.disabled = true; say('Verifying key with OpenRouter…');
+
+    request('POST', '/api/v1/agent/verify-key', { api_key: key }, auth.token)
+      .then(function (res) {
+        $('btnVerifyKey').disabled = false;
+        if (res.body.success) {
+          say('✅ Key is valid! (' + (res.body.model_count || 0) + ' models available)', 'ok');
+        } else {
+          say('❌ ' + (res.body.message || 'Invalid key.'), 'error');
+        }
+      })
+      .catch(function (e) { $('btnVerifyKey').disabled = false; say(e.message, 'error'); });
+  });
+
+  // Save settings
+  $('btnSaveSettings').addEventListener('click', function () {
+    if (!currentBid) { say('Select a business first.', 'error'); return; }
+    this.disabled = true; say('Saving…');
+
+    var payload = {
+      business_id:   currentBid,
+      model:         $('modelSelect').value,
+      system_prompt: $('systemPrompt').value.trim(),
+    };
+    var keyVal = $('apiKey').value.trim();
+    if (keyVal) payload.openrouter_api_key = keyVal;
+
+    request('POST', '/api/v1/agent/settings', payload, auth.token)
+      .then(function (res) {
+        $('btnSaveSettings').disabled = false;
+        if (!res.ok) { say(res.body.message || 'Save failed.', 'error'); return; }
+        say('Settings saved!', 'ok');
+        setTimeout(function () { enterChat(); }, 600);
+      })
+      .catch(function (e) { $('btnSaveSettings').disabled = false; say(e.message, 'error'); });
+  });
+
+  $('btnSkipToChat').addEventListener('click', function () {
+    if (!currentBid) { say('Select a business first.', 'error'); return; }
+    enterChat();
+  });
+
+  $('btnLogout').addEventListener('click', function () {
+    clearAuth(); chatHistory = []; currentBid = null;
+    $('password').value = ''; $('code').value = ''; $('apiKey').value = '';
+    showStep('step1');
+  });
+
+  // ── STEP 3: Chat ──────────────────────────────────────────────────────────
+  function enterChat() {
+    showStep('step3');
+    updateChatHeader();
+  }
+
+  function updateChatHeader() {
+    if (!currentBid) return;
+    request('GET', '/api/v1/agent/settings?business_id=' + currentBid, null, auth.token)
+      .then(function (res) {
+        if (!res.ok) return;
+        var d = res.body.data || {};
+        $('chatModelTag').textContent = d.model || '—';
+        if (d.has_api_key) {
+          agentReady = true;
+          $('agentBadge').className = 'badge connected';
+          $('badgeLabel').textContent = 'Ready';
+        } else {
+          agentReady = false;
+          $('agentBadge').className = 'badge disconnected';
+          $('badgeLabel').textContent = 'No Key';
+        }
+      })
+      .catch(function () {});
+  }
+
+  // Auto-grow textarea
+  var chatInput = $('chatInput');
+  chatInput.addEventListener('input', function () {
+    this.style.height = 'auto';
+    this.style.height = Math.min(this.scrollHeight, 160) + 'px';
+  });
+  chatInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+  $('btnSend').addEventListener('click', sendMessage);
+
+  function appendBubble(role, text, meta) {
+    var empty = $('emptyState');
+    if (empty) empty.remove();
+
+    var box = document.createElement('div');
+    box.className = 'bubble-wrap ' + role;
+
+    var bub = document.createElement('div');
+    bub.className = 'bubble';
+    bub.textContent = text;
+
+    var m = document.createElement('div');
+    m.className = 'bubble-meta';
+    m.textContent = meta || '';
+
+    box.appendChild(bub);
+    box.appendChild(m);
+    $('chatbox').appendChild(box);
+    $('chatbox').scrollTop = $('chatbox').scrollHeight;
+    return box;
+  }
+
+  function showTyping() {
+    var box = document.createElement('div');
+    box.className = 'bubble-wrap agent';
+    box.id = 'typingBubble';
+    box.innerHTML = '<div class="bubble"><div class="typing-dots"><span></span><span></span><span></span></div></div>';
+    $('chatbox').appendChild(box);
+    $('chatbox').scrollTop = $('chatbox').scrollHeight;
+  }
+  function removeTyping() {
+    var t = $('typingBubble');
+    if (t) t.remove();
+  }
+
+  function sendMessage() {
+    if (!currentBid) { say('Please select a business first (go to Settings).', 'warn'); return; }
+    var text = chatInput.value.trim();
+    if (!text) return;
+    if (!agentReady) { say('No API key configured. Go to ⚙ Settings to add your OpenRouter key.', 'warn'); return; }
+
+    // display user bubble
+    appendBubble('user', text, 'You · now');
+    chatHistory.push({ role: 'user', content: text });
+    chatInput.value = '';
+    chatInput.style.height = 'auto';
+    $('btnSend').disabled = true;
+    say('');
+    showTyping();
+
+    request('POST', '/api/v1/agent/chat', {
+      business_id: currentBid,
+      prompt:      text,
+      history:     chatHistory.slice(0, -1), // exclude the latest user message (already in prompt)
+    }, auth.token)
+      .then(function (res) {
+        removeTyping();
+        $('btnSend').disabled = false;
+
+        if (!res.ok || !res.body.success) {
+          var errMsg = res.body.message || 'Agent error.';
+          appendBubble('agent', '⚠ ' + errMsg, '');
+          say(errMsg, 'error');
+          chatHistory.pop(); // remove user msg from history on error
+          return;
+        }
+
+        var reply = res.body.text;
+        var model = res.body.model_used || '';
+        var usage = res.body.usage;
+
+        chatHistory.push({ role: 'assistant', content: reply });
+        appendBubble('agent', reply, model);
+
+        // show usage
+        if (usage) {
+          var ur = $('usageRow');
+          ur.style.display = 'flex';
+          ur.innerHTML =
+            '<span class="usage-chip">Prompt: <strong>' + (usage.prompt_tokens||0) + '</strong></span>' +
+            '<span class="usage-chip">Completion: <strong>' + (usage.completion_tokens||0) + '</strong></span>' +
+            '<span class="usage-chip">Total: <strong>' + (usage.total_tokens||0) + '</strong></span>';
+        }
+      })
+      .catch(function (e) {
+        removeTyping();
+        $('btnSend').disabled = false;
+        appendBubble('agent', '⚠ ' + e.message, '');
+        say(e.message, 'error');
+        chatHistory.pop();
+      });
+  }
+
+  $('btnClearChat').addEventListener('click', function () {
+    chatHistory = [];
+    $('chatbox').innerHTML = '<div class="empty-state" id="emptyState"><svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg><span>Send a message to get started</span></div>';
+    $('usageRow').style.display = 'none';
+    say('');
+  });
+
+  $('btnGoSettings').addEventListener('click', function () {
+    showStep('step2');
+    loadSettingsForBusiness();
+  });
+
+  // ── Bootstrap ──────────────────────────────────────────────────────────────
+  if (auth.token && auth.user) {
+    enterSettings();
+  }
+
+})();
+</script>
+</body>
+</html>

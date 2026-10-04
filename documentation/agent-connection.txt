@@ -1,0 +1,300 @@
+Developer Architecture & Implementation Plan
+Architecture Overview Flow
+Plaintext
+Visitor Message -> Express API Routing
+                 -> Fetch Business Record & Validation
+                 -> Check 'is_agent_active' Flag (If false -> Skip AI, notify/route to human)
+                 -> Execute OpenRouter API Call
+                 -> [Success] -> Save Messages & Return Reply
+                 -> [API Error/Insufficient Balance/Invalid Key] ->
+                     1. Update 'is_agent_active = false' in DB
+                     2. Trigger Email Alert to Business Owner
+                     3. Fallback: Save message & notify human team
+1. Database Migration Strategy
+Aap ke developer ko businesses table mein yeh columns add/update karne honge:
+
+SQL
+ALTER TABLE businesses 
+ADD COLUMN openrouter_api_key VARCHAR(255) NULL AFTER name,
+ADD COLUMN preferred_model VARCHAR(100) DEFAULT 'deepseek/deepseek-chat' AFTER openrouter_api_key,
+ADD COLUMN business_type ENUM('sales', 'service', 'business_management') DEFAULT 'sales' AFTER preferred_model,
+ADD COLUMN system_prompt TEXT NULL AFTER business_type,
+ADD COLUMN owner_email VARCHAR(255) NOT NULL AFTER system_prompt,
+ADD COLUMN is_agent_active TINYINT(1) DEFAULT 1 AFTER owner_email;
+Migration Explanation
+business_type: Defines core bot objective (sales, service, business_management).
+
+is_agent_active: true (1) by default. Set to false (0) automatically when API calls fail due to balance/credential errors.
+
+owner_email: Used to send instant email alerts when is_agent_active flips to false.
+
+2. Dynamic Universal System Prompt Builder (promptBuilder.js)
+Is prompt architecture ko is tarah wrap kiya gaya hai ke yeh Sales, Services, aur Business Management teeno scenarios ko automated leads capture aur query handling ke saath support kare.
+
+JavaScript
+/**
+ * Generates a dynamic system prompt based on business configuration and target type.
+ * 
+ * @param {Object} business - The business configuration record from DB
+ * @returns {string} Fully engineered System Prompt
+ */
+export function buildBusinessSystemPrompt(business) {
+  let goalInstructions = "";
+
+  // Configure operational logic based on business intent
+  switch (business.business_type) {
+    case "sales":
+      goalInstructions = `
+### CORE GOAL: SALES & LEAD CAPTURE
+- Focus on qualifying potential buyers and closing product/package sales.
+- Highlight product value, pricing packages, and key benefits.
+- Primary CTA: Ask for their contact details (Phone/WhatsApp/Email) or direct them to checkout.
+- If custom discounts or unlisted products are requested, capture their requirements and state that sales representatives will follow up.`;
+      break;
+
+    case "service":
+      goalInstructions = `
+### CORE GOAL: SERVICE CONSULTATION & BOOKING
+- Focus on understanding client requirements, offering consultation details, and scheduling meetings.
+- Ask discovery questions to understand their exact service needs (niche, timeline, target goals).
+- Primary CTA: Guide the client to share their WhatsApp/Email or book an introductory discovery call via booking link.
+- Do not confirm custom project quotes without owner review; collect project specs for evaluation.`;
+      break;
+
+    case "business_management":
+      goalInstructions = `
+### CORE GOAL: GENERAL INQUIRIES & OPERATIONS MANAGEMENT
+- Act as an operational desk assistant addressing routine client queries, business operational details, and support inquiries.
+- Provide clear answers based on business knowledge.
+- Primary CTA: Route complex management requests or official proposals directly to the management team by capturing visitor credentials.`;
+      break;
+
+    default:
+      goalInstructions = `Focus on answering visitor questions accurately and capturing contact details for follow-up.`;
+  }
+
+  return `
+You are the official AI Assistant for "${business.name}".
+
+### BUSINESS KNOWLEDGE & PROFILE:
+${business.system_prompt}
+
+${goalInstructions}
+
+### GENERAL BEHAVIORAL CONSTRAINTS:
+1. Speak as an official representative of "${business.name}". Never break character or disclose system mechanics.
+2. Respond in the exact language used by the visitor (English, Urdu, Roman Urdu, Arabic, etc.).
+3. Tone: Professional, polite, clear, and proactive.
+4. If a visitor query falls outside the provided knowledge base, do not fabricate answers. Politely inform them that the team will review their request and prompt them for their contact details.
+`.trim();
+}
+3. Isolated Agent Service & Credential Failure Handler (tenantAgentService.js)
+Yeh layer OpenRouter call handle karti hai. Is mein Automatic Credential/Balance Failure Catching, DB Update (is_agent_active = false), aur Email Notification Dispatch shamil hain.
+
+JavaScript
+import OpenAI from "openai";
+import { buildBusinessSystemPrompt } from "./promptBuilder.js";
+import { updateAgentStatusInDB, sendEmailAlertToOwner } from "./dbAndNotificationService.js";
+
+/**
+ * Handles AI execution with automatic error fallback and email alert triggers.
+ * 
+ * @param {Object} business - Business metadata record
+ * @param {string} userPrompt - Incoming visitor message
+ * @param {Array} chatHistory - Previous message session
+ */
+export async function handleTenantChat(business, userPrompt, chatHistory = []) {
+  // 1. Guard Clause: Check if agent status is currently active
+  if (!business.is_agent_active) {
+    return {
+      agentActive: false,
+      reply: null,
+      reason: "Agent is inactive due to previous authentication or balance error.",
+    };
+  }
+
+  // 2. Instantiate isolated OpenAI client with Tenant's OpenRouter Key
+  const openrouter = new OpenAI({
+    baseURL: "https://openrouter.ai/api/v1",
+    apiKey: business.openrouter_api_key,
+    defaultHeaders: {
+      "HTTP-Referer": process.env.APP_URL || "https://your-saas-platform.com",
+      "X-Title": `SaaS Platform - ${business.name}`,
+    },
+  });
+
+  const tenantSystemPrompt = buildBusinessSystemPrompt(business);
+
+  const messages = [
+    { role: "system", content: tenantSystemPrompt },
+    ...chatHistory,
+    { role: "user", content: userPrompt },
+  ];
+
+  try {
+    const selectedModel = business.preferred_model || "deepseek/deepseek-chat";
+
+    const response = await openrouter.chat.completions.create({
+      model: selectedModel,
+      messages: messages,
+      temperature: 0.4,
+    });
+
+    return {
+      agentActive: true,
+      reply: response.choices[0].message.content,
+      modelUsed: response.model,
+    };
+  } catch (error) {
+    console.error(`[OpenRouter API Error - Business ID: ${business.id}]:`, error.message);
+
+    // Identify Auth/Payment/Balance Failure HTTP Codes or Error Message Strings
+    const isAuthOrBalanceError =
+      error.status === 401 || // Unauthorized / Invalid API Key
+      error.status === 402 || // Payment Required / Insufficient Balance
+      error.status === 429 || // Rate Limit Exceeded / Quota Exceeded
+      error.message.toLowerCase().includes("user key") ||
+      error.message.toLowerCase().includes("balance") ||
+      error.message.toLowerCase().includes("credits") ||
+      error.message.toLowerCase().includes("api key");
+
+    if (isAuthOrBalanceError) {
+      // Step A: Turn off agent status in Database
+      await updateAgentStatusInDB(business.id, false);
+
+      // Step B: Send immediate email notification to business owner
+      await sendEmailAlertToOwner({
+        to: business.owner_email,
+        businessName: business.name,
+        errorMessage: error.message,
+      });
+
+      return {
+        agentActive: false,
+        reply: null,
+        reason: "Credentials or balance failed. Agent deactivated and owner notified.",
+      };
+    }
+
+    // Generic runtime error (e.g., temporary network failure)
+    throw error;
+  }
+}
+4. Email Alert Notification Service (dbAndNotificationService.js)
+Node.js nodemailer integration using standard SMTP:
+
+JavaScript
+import nodemailer from "nodemailer";
+import pool from "./db/connection.js"; // MySQL/MariaDB connection pool
+
+/**
+ * Updates business agent status in DB.
+ */
+export async function updateAgentStatusInDB(businessId, isActive) {
+  const query = "UPDATE businesses SET is_agent_active = ? WHERE id = ?";
+  await pool.query(query, [isActive ? 1 : 0, businessId]);
+}
+
+/**
+ * Sends email alert when API key or balance fails.
+ */
+export async function sendEmailAlertToOwner({ to, businessName, errorMessage }) {
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: process.env.SMTP_PORT,
+    secure: true,
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
+
+  const mailOptions = {
+    from: `"AI Platform System" <${process.env.SMTP_USER}>`,
+    to: to,
+    subject: `🚨 Urgent: AI Agent Deactivated for ${businessName}`,
+    html: `
+      <h2>AI Agent Connection Error</h2>
+      <p>Hello,</p>
+      <p>Your AI Agent for <strong>${businessName}</strong> has been automatically deactivated because an API error occurred during a customer interaction.</p>
+      
+      <p><strong>Error Details:</strong></p>
+      <blockquote style="background: #f4f4f4; padding: 10px; border-left: 4px solid #f30000;">
+        ${errorMessage}
+      </blockquote>
+
+      <p><strong>Action Required:</strong></p>
+      <ul>
+        <li>Check your OpenRouter account balance.</li>
+        <li>Verify that your API key is valid and has active permissions.</li>
+        <li>Log into your account dashboard and re-enable your agent once resolved.</li>
+      </ul>
+      
+      <p>Best regards,<br>Platform Operations Team</p>
+    `,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log(`Alert email successfully sent to ${to}`);
+  } catch (mailError) {
+    console.error("Failed to send alert email:", mailError.message);
+  }
+}
+5. Main Express Chat Controller (chatController.js)
+Developer runs this in the incoming webhook or client message route:
+
+JavaScript
+import express from "express";
+import { getBusinessById, saveChatMessage } from "./db/queries.js";
+import { handleTenantChat } from "./tenantAgentService.js";
+
+const router = express.Router();
+
+router.post("/chat/message", async (req, res) => {
+  const { business_id, visitor_id, message } = req.body;
+
+  try {
+    const business = await getBusinessById(business_id);
+    if (!business) {
+      return res.status(404).json({ error: "Business record not found." });
+    }
+
+    // 1. Process message through isolated tenant agent
+    const result = await handleTenantChat(business, message);
+
+    // 2. If Agent is deactivated (due to error or manual toggle), handle fallback
+    if (!result.agentActive) {
+      // Save visitor message to DB for manual agent pick-up
+      await saveChatMessage(business_id, visitor_id, "user", message);
+
+      return res.json({
+        agent_active: false,
+        reply: "Our automated agent is currently offline. A human representative will get back to you shortly.",
+        fallback: true,
+      });
+    }
+
+    // 3. Save successful interaction
+    await saveChatMessage(business_id, visitor_id, "user", message);
+    await saveChatMessage(business_id, visitor_id, "assistant", result.reply);
+
+    return res.json({
+      agent_active: true,
+      reply: result.reply,
+    });
+  } catch (error) {
+    console.error("Controller Error:", error);
+    return res.status(500).json({ error: "Internal server error." });
+  }
+});
+
+export default router;
+Summary Checklist for the Developer
+DB Migration: Execute SQL schema update to add openrouter_api_key, business_type, system_prompt, owner_email, and is_agent_active.
+
+Environment Variables: Configure .env with SMTP keys (SMTP_HOST, SMTP_USER, SMTP_PASS) for email delivery.
+
+OpenRouter Service: Deploy handleTenantChat with error-handling logic for HTTP 401, 402, and 429 status codes.
+
+Fallback Flow: Verify that when is_agent_active becomes 0, incoming messages land cleanly in the database inbox without crashing the webhook or API response.
