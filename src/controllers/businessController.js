@@ -1,7 +1,7 @@
 'use strict';
 
 const { Op } = require('sequelize');
-const { Business, BusinessSocial, SocialNumber, BusinessSocialNumber, Address, sequelize } = require('../../models');
+const { Business, BusinessUser, BusinessSocial, SocialNumber, BusinessSocialNumber, Address, sequelize } = require('../../models');
 const {
   businessCreateSchema,
   businessUpdateSchema,
@@ -86,9 +86,15 @@ module.exports = {
    * GET /business
    * List businesses. Filters: ?search= ?is_active= ?created_by=
    * Pagination: ?page= ?limit=
+   * super_admin sees every business; anyone else sees only the businesses they
+   * own or are linked to through business_users.
    */
   getBusinesses: async (req, res) => {
     try {
+      if (!req.user) {
+        return res.status(401).json({ success: false, message: 'Unauthorized: a valid Bearer token is required' });
+      }
+
       const { search, is_active, created_by } = req.query;
       const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
       const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
@@ -97,6 +103,14 @@ module.exports = {
       if (search) where.name = { [Op.like]: `%${search}%` };
       if (is_active !== undefined) where.is_active = is_active === 'true' || is_active === '1';
       if (created_by) where.created_by = created_by;
+
+      const roles = await req.user.getRoles({ attributes: ['name'], joinTableAttributes: [] });
+      if (!roles.some(r => r.name === 'super_admin')) {
+        const links = await BusinessUser.findAll({ where: { user_id: req.user.id }, attributes: ['business_id'] });
+        where[Op.and] = [{
+          [Op.or]: [{ id: links.map(l => l.business_id) }, { created_by: req.user.id }],
+        }];
+      }
 
       const { count, rows } = await Business.findAndCountAll({
         where,
@@ -217,6 +231,87 @@ module.exports = {
     } catch (err) {
       await t.rollback();
       console.error('[businessController.deleteBusiness] Error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error', error: err.message });
+    }
+  },
+
+  /**
+   * GET /business/:id/profile
+   * Get the company profile.
+   */
+  getBusinessProfile: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { BusinessProfile, Country } = require('../../models');
+
+      const business = await Business.findByPk(id);
+      if (!business) {
+        return res.status(404).json({ success: false, message: 'Business not found' });
+      }
+
+      const profile = await BusinessProfile.findOne({
+        where: { business_id: id },
+        include: [{ model: Country, as: 'country', attributes: ['id', 'name', 'code'] }],
+      });
+
+      return res.status(200).json({ success: true, profile: profile || {} });
+    } catch (err) {
+      console.error('[businessController.getBusinessProfile] Error:', err);
+      return res.status(500).json({ success: false, message: 'Internal server error', error: err.message });
+    }
+  },
+
+  /**
+   * PATCH /business/:id/profile
+   * Update the company profile.
+   */
+  updateBusinessProfile: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { NTN, logo, country_id } = req.body;
+      const { BusinessProfile, Country, Business } = require('../../models');
+
+      const business = await Business.findByPk(id);
+      if (!business) {
+        return res.status(404).json({ success: false, message: 'Business not found' });
+      }
+
+      if (country_id) {
+        const country = await Country.findByPk(country_id);
+        if (!country) {
+          return res.status(404).json({ success: false, message: 'Country not found' });
+        }
+      }
+
+      let profile = await BusinessProfile.findOne({ where: { business_id: id } });
+
+      if (profile) {
+        await profile.update({
+          NTN: NTN !== undefined ? NTN : profile.NTN,
+          logo: logo !== undefined ? logo : profile.logo,
+          country_id: country_id !== undefined ? country_id : profile.country_id,
+        });
+      } else {
+        profile = await BusinessProfile.create({
+          business_id: id,
+          NTN,
+          logo,
+          country_id,
+        });
+      }
+
+      const updatedProfile = await BusinessProfile.findOne({
+        where: { business_id: id },
+        include: [{ model: Country, as: 'country', attributes: ['id', 'name', 'code'] }],
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: 'Business profile updated successfully',
+        profile: updatedProfile,
+      });
+    } catch (err) {
+      console.error('[businessController.updateBusinessProfile] Error:', err);
       return res.status(500).json({ success: false, message: 'Internal server error', error: err.message });
     }
   },

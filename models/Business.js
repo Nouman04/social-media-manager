@@ -43,15 +43,16 @@ module.exports = (sequelize, DataTypes) => {
         as: 'members',
       });
     }
+    
+    if (models.BusinessProfile) {
+      Business.hasOne(models.BusinessProfile, { foreignKey: 'business_id', as: 'profile' });
+    }
 
     if (models.BusinessUser) {
       Business.hasMany(models.BusinessUser, { foreignKey: 'business_id', as: 'memberLinks' });
     }
     if (models.Role) {
       Business.hasMany(models.Role, { foreignKey: 'business_id', as: 'roles' });
-    }
-    if (models.Permission) {
-      Business.hasMany(models.Permission, { foreignKey: 'business_id', as: 'permissions' });
     }
     if (models.SocialNumber) {
       Business.hasMany(models.SocialNumber, { foreignKey: 'business_id', as: 'socialNumbers' });
@@ -76,6 +77,9 @@ module.exports = (sequelize, DataTypes) => {
         scope: { addressable_type: 'Business' },
         as: 'address',
       });
+    }
+    if (models.Subscription) {
+      Business.hasMany(models.Subscription, { foreignKey: 'business_id', as: 'subscriptions' });
     }
   };
 

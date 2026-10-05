@@ -35,6 +35,22 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.DATE,
       allowNull: true,
     },
+    phone: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    avatar: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    timezone: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    locale: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
     authentication_code: {
       type: DataTypes.STRING,
       allowNull: true,

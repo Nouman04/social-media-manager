@@ -3,7 +3,7 @@
 const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const { User, Business, BusinessUser, sequelize } = require('../../models');
+const { User, Business, BusinessUser, Subscription, Plan, PlanFeature, sequelize } = require('../../models');
 const { sendInvitationEmail } = require('../helpers/mailService');
 const {
   inviteUserSchema,
@@ -96,6 +96,43 @@ module.exports = {
           success: false,
           message: 'You do not have access to this business',
         });
+      }
+
+      // ── Seat-limit check: enforce max_users from active plan ──────────────
+      const activeSubscription = await Subscription.findOne({
+        where: {
+          business_id,
+          stripe_status: ['trialing', 'active'],
+        },
+        include: [{
+          model: Plan, as: 'plan',
+          include: [{ model: PlanFeature, as: 'features' }],
+        }],
+        transaction: t,
+      });
+
+      if (activeSubscription && activeSubscription.plan) {
+        const maxUsersFeature = activeSubscription.plan.features.find(
+          f => f.feature_name === 'max_users'
+        );
+
+        if (maxUsersFeature && maxUsersFeature.feature_value !== 'unlimited') {
+          const maxUsers = parseInt(maxUsersFeature.feature_value, 10);
+          const currentActiveMembers = await BusinessUser.count({
+            where: { business_id, is_active: true },
+            transaction: t,
+          });
+
+          if (currentActiveMembers >= maxUsers) {
+            await t.rollback();
+            return res.status(403).json({
+              success: false,
+              message: `Your plan allows a maximum of ${maxUsers} users. Please upgrade your plan to add more members.`,
+              current_members: currentActiveMembers,
+              max_allowed: maxUsers,
+            });
+          }
+        }
       }
 
       let user = await User.findOne({ where: { email }, transaction: t });
@@ -548,6 +585,171 @@ module.exports = {
       });
     } catch (err) {
       return fail(res, err, 'restoreBusinessUser');
+    }
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  7. UPDATE STATUS (Active / Inactive)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * PATCH /business-users/status
+   * Body: { business_id, user_id, is_active }
+   * Updates the active status of a business user.
+   */
+  updateBusinessUserStatus: async (req, res) => {
+    try {
+      const { business_id, user_id, is_active } = req.body;
+
+      const missing = [];
+      if (!business_id) missing.push('business_id is required');
+      if (!user_id) missing.push('user_id is required');
+      if (typeof is_active !== 'boolean') missing.push('is_active is required and must be boolean');
+      
+      if (missing.length) {
+        return res.status(400).json({ success: false, message: 'Validation failed', details: missing });
+      }
+
+      const actingMembership = await getActiveMembership(business_id, req.user.id);
+      if (!actingMembership) {
+        return res.status(403).json({
+          success: false,
+          message: 'You do not have access to this business',
+        });
+      }
+
+      const link = await BusinessUser.findOne({ where: { business_id, user_id } });
+      if (!link) {
+        return res.status(404).json({ success: false, message: 'User is not a member of this business' });
+      }
+
+      if (link.is_owner && !is_active) {
+        return res.status(400).json({
+          success: false,
+          message: 'The business owner cannot be deactivated',
+        });
+      }
+
+      await link.update({ is_active });
+
+      return res.status(200).json({
+        success: true,
+        message: `User successfully ${is_active ? 'activated' : 'deactivated'} in the business`,
+        membership: {
+          business_id: link.business_id,
+          user_id: link.user_id,
+          is_active: link.is_active,
+        },
+      });
+    } catch (err) {
+      return fail(res, err, 'updateBusinessUserStatus');
+    }
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  8. SEAT COUNTER (active + pending vs. purchased seats)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /business-users/seats?business_id=
+   *
+   * Returns:
+   *  - active_members: users with is_active = true who have set a password
+   *  - pending_invites: users with is_active = true who still have an auth token (not accepted)
+   *  - total_occupied: active_members + pending_invites
+   *  - max_seats: from the plan's max_users feature (or 'unlimited')
+   *  - available_seats: max_seats - total_occupied (or 'unlimited')
+   */
+  getSeatCounter: async (req, res) => {
+    try {
+      const { business_id } = req.query;
+
+      if (!business_id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          details: ['business_id is required'],
+        });
+      }
+
+      const business = await Business.findByPk(business_id);
+      if (!business) {
+        return res.status(404).json({ success: false, message: 'Business not found' });
+      }
+
+      const actingMembership = await getActiveMembership(business_id, req.user.id);
+      if (!actingMembership) {
+        return res.status(403).json({
+          success: false,
+          message: 'You do not have access to this business',
+        });
+      }
+
+      // Fetch all active business-user links with their user records
+      const activeLinks = await BusinessUser.findAll({
+        where: { business_id, is_active: true },
+        include: [{
+          model: User,
+          as: 'user',
+          attributes: ['id', 'password', 'authentication_token', 'invitation_expired_at'],
+        }],
+      });
+
+      let activeMembers = 0;
+      let pendingInvites = 0;
+
+      for (const link of activeLinks) {
+        if (link.user && link.user.authentication_token) {
+          // Has a pending token → invitation not yet accepted
+          pendingInvites++;
+        } else {
+          activeMembers++;
+        }
+      }
+
+      const totalOccupied = activeMembers + pendingInvites;
+
+      // Get max_seats from the active plan
+      let maxSeats = 'unlimited';
+      let availableSeats = 'unlimited';
+      let planName = null;
+
+      const activeSubscription = await Subscription.findOne({
+        where: {
+          business_id,
+          stripe_status: ['trialing', 'active'],
+        },
+        include: [{
+          model: Plan, as: 'plan',
+          include: [{ model: PlanFeature, as: 'features' }],
+        }],
+      });
+
+      if (activeSubscription && activeSubscription.plan) {
+        planName = activeSubscription.plan.name;
+        const maxUsersFeature = activeSubscription.plan.features.find(
+          f => f.feature_name === 'max_users'
+        );
+
+        if (maxUsersFeature && maxUsersFeature.feature_value !== 'unlimited') {
+          maxSeats = parseInt(maxUsersFeature.feature_value, 10);
+          availableSeats = Math.max(0, maxSeats - totalOccupied);
+        }
+      }
+
+      return res.status(200).json({
+        success: true,
+        seats: {
+          active_members: activeMembers,
+          pending_invites: pendingInvites,
+          total_occupied: totalOccupied,
+          max_seats: maxSeats,
+          available_seats: availableSeats,
+          plan_name: planName,
+        },
+      });
+    } catch (err) {
+      return fail(res, err, 'getSeatCounter');
     }
   },
 };

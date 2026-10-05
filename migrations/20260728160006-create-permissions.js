@@ -13,13 +13,6 @@ module.exports = {
         type: Sequelize.STRING,
         allowNull: false,
       },
-      business_id: {
-        type: Sequelize.INTEGER,
-        allowNull: true,
-        references: { model: 'businesses', key: 'id' },
-        onUpdate: 'CASCADE',
-        onDelete: 'SET NULL',
-      },
       created_at: {
         type: Sequelize.DATE,
         allowNull: false,

@@ -7,6 +7,7 @@ const cors = require("cors");
 const passport = require("passport");
 const initializePassport = require("./src/config/passportConfig");
 const realtime = require("./src/helpers/realtime");
+const requestContext = require("./src/middleware/requestContext");
 
 const twoFactorAuthRoutes = require("./src/routes/twoFactorAuthRoutes");
 const rbacRoutes = require("./src/routes/rbacRoutes");
@@ -16,13 +17,24 @@ const whatsappRoutes = require("./src/routes/whatsappRoutes");
 const instagramRoutes = require("./src/routes/instagramRoutes");
 const messengerRoutes = require("./src/routes/messengerRoutes");
 const metaWebhookRoutes = require("./src/routes/metaWebhookRoutes");
+const userRoutes = require("./src/routes/userRoutes");
+const countryRoutes = require("./src/routes/countryRoutes");
+const planRoutes = require("./src/routes/planRoutes");
+const subscriptionRoutes = require("./src/routes/subscriptionRoutes");
 
 const app = express();
 const PORT = process.env.NODE_PORT || process.env.PORT || 5000;
 
 initializePassport(passport);
 
+const stripeWebhookRoutes = require("./src/routes/stripeWebhookRoutes");
+
+app.use(requestContext);
 app.use(cors());
+
+// Stripe Webhook needs raw body, mount it before body-parser
+app.use("/api/v1/stripe", stripeWebhookRoutes);
+
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(passport.initialize());
@@ -40,9 +52,21 @@ app.use("/api/v1/messenger", messengerRoutes);
 // Shared Instagram/Messenger webhook — one Callback URL for both.
 // WhatsApp keeps its own separate webhook (see whatsappRoutes.js).
 app.use("/api/v1/meta", metaWebhookRoutes);
+app.use("/users", userRoutes);
+app.use("/countries", countryRoutes);
+app.use("/plans", planRoutes);
+app.use("/subscriptions", subscriptionRoutes);
 
 app.get("/", (req, res) => {
   res.json({ success: true, message: "SMM API Server Running" });
+});
+app.get("/pricing", (req, res) => {
+  res.sendFile(path.join(__dirname, "src/public/pricing.html"));
+});
+
+// Stripe Checkout success_url lands here
+app.get("/success", (req, res) => {
+  res.sendFile(path.join(__dirname, "src/public/success.html"));
 });
 
 // Meta App Dashboard's Privacy Policy / Terms of Service URL fields point here.

@@ -56,4 +56,17 @@ router.delete('/', businessUserController.removeBusinessUser);
  */
 router.put('/restore', businessUserController.restoreBusinessUser);
 
+/**
+ * PATCH /business-users/status
+ * Activate or deactivate a user in the business.
+ * Body: { business_id, user_id, is_active }
+ */
+router.patch('/status', businessUserController.updateBusinessUserStatus);
+
+/**
+ * GET /business-users/seats?business_id=
+ * Returns active members, pending invites, and max seats from plan.
+ */
+router.get('/seats', businessUserController.getSeatCounter);
+
 module.exports = router;

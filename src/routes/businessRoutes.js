@@ -34,6 +34,8 @@ router.delete('/business-socials/:id/sync', businessController.unsyncSocialNumbe
 router.post('/', businessController.createBusiness);
 router.get('/', businessController.getBusinesses);
 router.get('/:businessId/social-numbers', businessController.getSocialNumbersByBusiness);
+router.get('/:id/profile', businessController.getBusinessProfile);
+router.patch('/:id/profile', businessController.updateBusinessProfile);
 router.get('/:id', businessController.getBusinessById);
 router.put('/:id', businessController.updateBusiness);
 router.delete('/:id', businessController.deleteBusiness);

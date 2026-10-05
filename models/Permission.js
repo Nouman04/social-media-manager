@@ -11,16 +11,6 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.STRING,
       allowNull: false,
     },
-    business_id: {
-      type: DataTypes.INTEGER,
-      allowNull: true,
-      references: {
-        model: 'businesses',
-        key: 'id',
-      },
-      onUpdate: 'CASCADE',
-      onDelete: 'SET NULL',
-    },
   }, {
     tableName: 'permissions',
     timestamps: true,
@@ -29,10 +19,6 @@ module.exports = (sequelize, DataTypes) => {
   });
 
   Permission.associate = function(models) {
-    if (models.Business) {
-      Permission.belongsTo(models.Business, { foreignKey: 'business_id', as: 'business' });
-    }
-
     if (models.Role) {
       Permission.belongsToMany(models.Role, {
         through: models.RolePermission || 'roles_has_permissions',

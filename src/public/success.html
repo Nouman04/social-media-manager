@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Subscription — SMM</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0a0e1a; color: #e2e8f0;
+           min-height: 100vh; display: flex; align-items: center; justify-content: center; margin: 0; }
+    .box { background: #1a2236; border: 1px solid #2a3550; border-radius: 16px;
+           padding: 40px; max-width: 440px; width: 90%; text-align: center; }
+    h1 { font-size: 1.5rem; margin: 12px 0; }
+    p { color: #94a3b8; }
+    .icon { font-size: 3rem; }
+    a { display: inline-block; margin-top: 20px; background: #6366f1; color: #fff;
+        padding: 12px 28px; border-radius: 10px; text-decoration: none; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="icon" id="icon">⏳</div>
+    <h1 id="title">Confirming your subscription…</h1>
+    <p id="msg">Please wait.</p>
+    <a href="/pricing">Back to Pricing</a>
+  </div>
+  <script>
+    (async () => {
+      const set = (icon, title, msg) => {
+        document.getElementById('icon').textContent = icon;
+        document.getElementById('title').textContent = title;
+        document.getElementById('msg').textContent = msg;
+      };
+      const sessionId = new URLSearchParams(location.search).get('session_id');
+      if (!sessionId) return set('⚠️', 'Missing session', 'No checkout session found.');
+      try {
+        const res = await fetch(`/subscriptions/checkout/confirm?session_id=${encodeURIComponent(sessionId)}`);
+        const data = await res.json();
+        if (!data.success) throw new Error(data.message || 'Could not confirm');
+        const s = data.subscription;
+        set('✅', 'Subscription activated!',
+          `${s.plan ? s.plan.name : 'Plan'} — status: ${s.stripe_status}`);
+      } catch (e) {
+        set('❌', 'Something went wrong', e.message);
+      }
+    })();
+  </script>
+</body>
+</html>

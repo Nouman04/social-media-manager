@@ -12,12 +12,10 @@ const roleUpdateSchema = Joi.object({
 
 const permissionCreateSchema = Joi.object({
   name: Joi.string().trim().min(2).max(100).required(),
-  business_id: Joi.number().integer().positive().allow(null).optional(),
 });
 
 const permissionUpdateSchema = Joi.object({
   name: Joi.string().trim().min(2).max(100).optional(),
-  business_id: Joi.number().integer().positive().allow(null).optional(),
 });
 
 const rolePermissionSchema = Joi.object({

@@ -132,14 +132,14 @@ module.exports = {
         return res.status(400).json({ success: false, message: "Validation failed", details: error.details.map(d => d.message) });
       }
 
-      const { name, business_id } = req.body;
+      const { name } = req.body;
 
-      const existingPermission = await Permission.findOne({ where: { name, business_id: business_id || null } });
+      const existingPermission = await Permission.findOne({ where: { name } });
       if (existingPermission) {
         return res.status(400).json({ success: false, message: "Permission with this name already exists" });
       }
 
-      const permission = await Permission.create({ name, business_id: business_id || null });
+      const permission = await Permission.create({ name });
       return res.status(201).json({ success: true, message: "Permission created successfully", permission });
     } catch (err) {
       console.error("[rbacController.createPermission] Error:", err);
@@ -149,10 +149,7 @@ module.exports = {
 
   getPermissions: async (req, res) => {
     try {
-      const { business_id } = req.query;
-      const whereClause = business_id ? { business_id } : {};
-
-      const permissions = await Permission.findAll({ where: whereClause });
+      const permissions = await Permission.findAll();
       return res.status(200).json({ success: true, permissions });
     } catch (err) {
       console.error("[rbacController.getPermissions] Error:", err);
@@ -188,11 +185,14 @@ module.exports = {
         return res.status(404).json({ success: false, message: "Permission not found" });
       }
 
-      const { name, business_id } = req.body;
-      await permission.update({
-        name: name !== undefined ? name : permission.name,
-        business_id: business_id !== undefined ? business_id : permission.business_id,
-      });
+      const { name } = req.body;
+      if (name !== undefined && name !== permission.name) {
+        const duplicate = await Permission.findOne({ where: { name } });
+        if (duplicate) {
+          return res.status(400).json({ success: false, message: "Permission with this name already exists" });
+        }
+        await permission.update({ name });
+      }
 
       return res.status(200).json({ success: true, message: "Permission updated successfully", permission });
     } catch (err) {

@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Choose Your Plan — SMM</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0a0e1a;
+      --surface: #111827;
+      --card: #1a2236;
+      --card-hover: #1e2a42;
+      --border: #2a3550;
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+      --primary: #6366f1;
+      --primary-glow: rgba(99, 102, 241, 0.25);
+      --accent: #22d3ee;
+      --success: #34d399;
+      --danger: #f87171;
+      --gold: #fbbf24;
+      --radius: 16px;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Animated BG ─────────────────────────────────────────── */
+    .bg-glow {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background:
+        radial-gradient(ellipse 600px 400px at 20% 30%, rgba(99,102,241,.12), transparent),
+        radial-gradient(ellipse 500px 350px at 80% 70%, rgba(34,211,238,.08), transparent);
+      pointer-events: none; z-index: 0;
+    }
+
+    /* ── Container ───────────────────────────────────────────── */
+    .container {
+      position: relative; z-index: 1;
+      max-width: 1200px; margin: 0 auto; padding: 40px 24px 80px;
+    }
+
+    /* ── Header ──────────────────────────────────────────────── */
+    .page-header {
+      text-align: center; margin-bottom: 48px;
+    }
+    .page-header h1 {
+      font-size: 2.5rem; font-weight: 800;
+      background: linear-gradient(135deg, #fff 0%, var(--accent) 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      margin-bottom: 12px;
+    }
+    .page-header p {
+      color: var(--text-muted); font-size: 1.1rem; max-width: 520px; margin: 0 auto;
+    }
+
+    /* ── Auth Bar ─────────────────────────────────────────────── */
+    .auth-bar {
+      display: flex; gap: 12px; align-items: center; justify-content: center;
+      margin-bottom: 16px; flex-wrap: wrap;
+    }
+    .auth-bar input {
+      background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+      padding: 10px 16px; color: var(--text); font-size: .9rem; width: 220px;
+      outline: none; transition: border .2s;
+    }
+    .auth-bar input:focus { border-color: var(--primary); }
+    .auth-bar button {
+      background: var(--primary); color: #fff; border: none; border-radius: 10px;
+      padding: 10px 24px; font-weight: 600; cursor: pointer; font-size: .9rem;
+      transition: transform .15s, box-shadow .2s;
+    }
+    .auth-bar button:hover { transform: translateY(-1px); box-shadow: 0 4px 20px var(--primary-glow); }
+    .auth-status {
+      font-size: .85rem; padding: 6px 14px; border-radius: 20px;
+      background: rgba(52,211,153,.1); color: var(--success); display: none;
+    }
+    .auth-status.error { background: rgba(248,113,113,.1); color: var(--danger); }
+
+    /* ── 2FA Panel ────────────────────────────────────────────── */
+    .twofa-panel {
+      display: none; flex-direction: column; align-items: center; gap: 12px;
+      background: var(--card); border: 1px solid var(--primary); border-radius: 16px;
+      padding: 28px 32px; max-width: 420px; margin: 0 auto 32px;
+      box-shadow: 0 0 30px var(--primary-glow);
+      animation: fadeIn .3s ease;
+    }
+    .twofa-panel.visible { display: flex; }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(-10px); } to { opacity:1; transform:translateY(0); } }
+    .twofa-panel h3 { font-size: 1.1rem; font-weight: 700; color: var(--accent); }
+    .twofa-panel p { font-size: .85rem; color: var(--text-muted); text-align:center; }
+    .twofa-panel input {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 12px 20px; color: var(--text); font-size: 1.4rem; font-weight: 700;
+      letter-spacing: 8px; text-align: center; width: 240px; outline: none;
+      transition: border .2s;
+    }
+    .twofa-panel input:focus { border-color: var(--accent); }
+    .twofa-panel button {
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      color: #fff; border: none; border-radius: 10px;
+      padding: 12px 32px; font-weight: 700; cursor: pointer; font-size: .95rem;
+      transition: transform .15s, opacity .2s; width: 100%;
+    }
+    .twofa-panel button:hover { transform: translateY(-1px); opacity: .9; }
+
+    /* ── Plan Grid ────────────────────────────────────────────── */
+    .plans-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 24px; margin-bottom: 48px;
+    }
+
+    .plan-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 32px 28px;
+      transition: transform .25s, border-color .25s, box-shadow .25s;
+      position: relative; overflow: hidden;
+      display: flex; flex-direction: column;
+    }
+    .plan-card:hover {
+      transform: translateY(-4px); border-color: var(--primary);
+      box-shadow: 0 8px 40px var(--primary-glow);
+    }
+    .plan-card.popular {
+      border-color: var(--gold);
+      box-shadow: 0 0 30px rgba(251,191,36,.1);
+    }
+    .plan-card.popular::before {
+      content: '⭐ MOST POPULAR';
+      position: absolute; top: 16px; right: -30px;
+      background: linear-gradient(135deg, var(--gold), #f59e0b);
+      color: #000; font-size: .65rem; font-weight: 700;
+      padding: 4px 40px; transform: rotate(45deg);
+      letter-spacing: .5px;
+    }
+
+    .plan-name {
+      font-size: 1.3rem; font-weight: 700; margin-bottom: 8px;
+    }
+    .plan-desc {
+      color: var(--text-muted); font-size: .9rem; margin-bottom: 20px; min-height: 40px;
+    }
+    .plan-price {
+      font-size: 2.8rem; font-weight: 800; margin-bottom: 4px;
+      display: flex; align-items: baseline; gap: 6px;
+    }
+    .plan-price .currency { font-size: 1.4rem; font-weight: 600; color: var(--text-muted); }
+    .plan-price .interval { font-size: .95rem; font-weight: 400; color: var(--text-muted); }
+    .plan-trial {
+      font-size: .8rem; color: var(--accent); margin-bottom: 20px;
+      display: flex; align-items: center; gap: 6px;
+    }
+
+    .plan-features {
+      list-style: none; margin-bottom: 28px; flex: 1;
+    }
+    .plan-features li {
+      padding: 6px 0; font-size: .88rem; color: var(--text-muted);
+      display: flex; align-items: center; gap: 10px;
+    }
+    .plan-features li::before {
+      content: '✓'; color: var(--success); font-weight: 700; font-size: .8rem;
+      width: 20px; height: 20px; border-radius: 50%;
+      background: rgba(52,211,153,.1); display: flex;
+      align-items: center; justify-content: center; flex-shrink: 0;
+    }
+
+    .plan-subscribe-btn {
+      width: 100%; padding: 14px; border: none; border-radius: 12px;
+      font-size: .95rem; font-weight: 700; cursor: pointer;
+      transition: all .2s; text-transform: uppercase; letter-spacing: .5px;
+      background: linear-gradient(135deg, var(--primary), #818cf8); color: #fff;
+    }
+    .plan-subscribe-btn:hover {
+      transform: translateY(-2px); box-shadow: 0 6px 25px var(--primary-glow);
+    }
+    .plan-subscribe-btn:disabled {
+      opacity: .5; cursor: not-allowed; transform: none; box-shadow: none;
+    }
+    .plan-subscribe-btn.subscribed {
+      background: linear-gradient(135deg, var(--success), #10b981);
+      cursor: default;
+    }
+
+    /* ── Business ID selector ────────────────────────────────── */
+    .business-select {
+      display: flex; align-items: center; gap: 12px; justify-content: center;
+      margin-bottom: 32px; flex-wrap: wrap;
+    }
+    .business-select label { color: var(--text-muted); font-size: .9rem; font-weight: 500; }
+    .business-select input {
+      background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+      padding: 10px 16px; color: var(--text); font-size: .9rem; width: 120px;
+      outline: none; text-align: center;
+    }
+    .business-select input:focus { border-color: var(--primary); }
+
+    /* ── Current Subscription ────────────────────────────────── */
+    .current-sub {
+      background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 24px 28px; margin-bottom: 32px; display: none;
+    }
+    .current-sub h3 {
+      font-size: 1rem; font-weight: 600; margin-bottom: 12px;
+      color: var(--accent); display: flex; align-items: center; gap: 8px;
+    }
+    .current-sub .sub-details {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+    }
+    .sub-detail {
+      background: rgba(99,102,241,.06); border-radius: 10px; padding: 12px 16px;
+    }
+    .sub-detail .label { font-size: .75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
+    .sub-detail .value { font-size: 1rem; font-weight: 600; margin-top: 4px; }
+
+    /* ── Loading / Empty ─────────────────────────────────────── */
+    .loading {
+      text-align: center; padding: 80px 20px; color: var(--text-muted);
+    }
+    .spinner {
+      width: 40px; height: 40px; border: 3px solid var(--border);
+      border-top-color: var(--primary); border-radius: 50%;
+      animation: spin .8s linear infinite; margin: 0 auto 16px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Toast ────────────────────────────────────────────────── */
+    .toast {
+      position: fixed; bottom: 24px; right: 24px;
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 12px; padding: 16px 24px; z-index: 1000;
+      transform: translateY(120px); opacity: 0; transition: all .3s;
+      max-width: 400px; box-shadow: 0 8px 30px rgba(0,0,0,.4);
+    }
+    .toast.show { transform: translateY(0); opacity: 1; }
+    .toast.success { border-color: var(--success); }
+    .toast.error { border-color: var(--danger); }
+    .toast-title { font-weight: 700; font-size: .9rem; margin-bottom: 4px; }
+    .toast-msg { font-size: .82rem; color: var(--text-muted); }
+  </style>
+</head>
+<body>
+  <div class="bg-glow"></div>
+  <div class="container">
+    <div class="page-header">
+      <h1>Choose Your Plan</h1>
+      <p>Select the perfect plan for your business and start managing your social media like a pro.</p>
+    </div>
+
+    <!-- Auth -->
+    <div class="auth-bar">
+      <input type="email" id="loginEmail" placeholder="Email" />
+      <input type="password" id="loginPassword" placeholder="Password" onkeydown="if(event.key==='Enter')login()" />
+      <button id="loginBtn" onclick="login()">Login</button>
+      <span class="auth-status" id="authStatus"></span>
+    </div>
+
+    <!-- 2FA Verification Panel -->
+    <div class="twofa-panel" id="twofaPanel">
+      <h3>🔐 Two-Factor Authentication</h3>
+      <p>We've sent a 6-digit code to your email address.<br/>Enter it below to complete login.</p>
+      <input type="text" id="twofaCode" maxlength="6" placeholder="000000"
+        oninput="this.value=this.value.replace(/\D/g,'')" onkeydown="if(event.key==='Enter')verify2FA()" />
+      <button onclick="verify2FA()">Verify &amp; Login</button>
+      <span style="font-size:.8rem;color:var(--text-muted);cursor:pointer" onclick="resetAuth()">← Back to login</span>
+    </div>
+
+    <!-- Business ID -->
+    <div class="business-select">
+      <label>Business ID:</label>
+      <input type="number" id="businessId" value="1" min="1" onchange="loadCurrentSubscription()" />
+    </div>
+
+    <!-- Current Subscription -->
+    <div class="current-sub" id="currentSub">
+      <h3>📋 Current Subscription</h3>
+      <div class="sub-details" id="subDetails"></div>
+    </div>
+
+    <!-- Plans -->
+    <div id="plansContainer">
+      <div class="loading">
+        <div class="spinner"></div>
+        <p>Loading plans...</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast">
+    <div class="toast-title" id="toastTitle"></div>
+    <div class="toast-msg" id="toastMsg"></div>
+  </div>
+
+  <script>
+    const API = window.location.origin;
+    let TOKEN = '';
+    let currentSubId = null;
+
+    // ── Toast ──────────────────────────────────────────────────
+    function showToast(title, msg, type = 'success') {
+      const t = document.getElementById('toast');
+      document.getElementById('toastTitle').textContent = title;
+      document.getElementById('toastMsg').textContent = msg;
+      t.className = `toast show ${type}`;
+      setTimeout(() => t.classList.remove('show'), 4000);
+    }
+
+    // ── Auth ───────────────────────────────────────────────────
+    let pendingEmail = '';
+
+    async function login() {
+      const email = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value;
+      const s = document.getElementById('authStatus');
+      if (!email || !password) {
+        s.textContent = '✗ Email and password are required';
+        s.className = 'auth-status error'; s.style.display = 'inline-block';
+        return;
+      }
+      const btn = document.getElementById('loginBtn');
+      btn.textContent = 'Sending…'; btn.disabled = true;
+      try {
+        const res = await fetch(`${API}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await res.json();
+        if (data.requires2FA) {
+          // Show 2FA panel
+          pendingEmail = email;
+          document.getElementById('twofaPanel').classList.add('visible');
+          document.getElementById('twofaCode').focus();
+          s.textContent = '📧 2FA code sent to your email';
+          s.className = 'auth-status'; s.style.display = 'inline-block';
+        } else if (data.token) {
+          // Direct token (no 2FA)
+          setLoggedIn(data.token, email);
+        } else {
+          throw new Error(data.message || 'Login failed');
+        }
+      } catch (e) {
+        s.textContent = `✗ ${e.message}`;
+        s.className = 'auth-status error'; s.style.display = 'inline-block';
+      } finally {
+        btn.textContent = 'Login'; btn.disabled = false;
+      }
+    }
+
+    async function verify2FA() {
+      const code = document.getElementById('twofaCode').value.trim();
+      const s = document.getElementById('authStatus');
+      if (code.length !== 6) {
+        showToast('Invalid Code', 'Enter the 6-digit code from your email', 'error');
+        return;
+      }
+      try {
+        const res = await fetch(`${API}/auth/verify-2fa`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: pendingEmail, code }),
+        });
+        const data = await res.json();
+        if (data.success && data.token) {
+          document.getElementById('twofaPanel').classList.remove('visible');
+          document.getElementById('twofaCode').value = '';
+          setLoggedIn(data.token, pendingEmail);
+          pendingEmail = '';
+        } else {
+          showToast('Verification Failed', data.message || 'Invalid code', 'error');
+        }
+      } catch (e) {
+        showToast('Error', e.message, 'error');
+      }
+    }
+
+    function setLoggedIn(token, email) {
+      TOKEN = token;
+      const s = document.getElementById('authStatus');
+      s.textContent = `✓ Logged in as ${email}`;
+      s.className = 'auth-status'; s.style.display = 'inline-block';
+      document.getElementById('loginEmail').value = '';
+      document.getElementById('loginPassword').value = '';
+      document.getElementById('loginBtn').textContent = 'Logged In ✓';
+      document.getElementById('loginBtn').disabled = true;
+      loadPlans();
+      loadCurrentSubscription();
+    }
+
+    function resetAuth() {
+      pendingEmail = '';
+      TOKEN = '';
+      document.getElementById('twofaPanel').classList.remove('visible');
+      document.getElementById('twofaCode').value = '';
+      document.getElementById('authStatus').style.display = 'none';
+      document.getElementById('loginBtn').textContent = 'Login';
+      document.getElementById('loginBtn').disabled = false;
+    }
+
+    function authHeaders() {
+      return {
+        'Content-Type': 'application/json',
+        ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
+      };
+    }
+
+    // ── Load Plans ────────────────────────────────────────────
+    async function loadPlans() {
+      const c = document.getElementById('plansContainer');
+      try {
+        const res = await fetch(`${API}/plans?is_active=true`, { headers: authHeaders() });
+        const data = await res.json();
+        if (!data.success || !data.plans.length) {
+          c.innerHTML = '<div class="loading"><p>No plans available yet.</p></div>';
+          return;
+        }
+        renderPlans(data.plans);
+      } catch (e) {
+        c.innerHTML = `<div class="loading"><p>Error loading plans: ${e.message}</p></div>`;
+      }
+    }
+
+    function renderPlans(plans) {
+      const c = document.getElementById('plansContainer');
+      const popularIdx = plans.length > 1 ? 1 : 0; // second plan = popular
+      c.innerHTML = `<div class="plans-grid">${plans.map((p, i) => {
+        const features = (p.features || []).map(f =>
+          `<li>${f.feature_name.replace(/_/g, ' ')}: <strong style="color:#e2e8f0">${f.feature_value}</strong></li>`
+        ).join('');
+        const isPopular = i === popularIdx ? ' popular' : '';
+        const isCurrentPlan = currentSubId && currentSubPlanId === p.id;
+
+        return `
+          <div class="plan-card${isPopular}">
+            <div class="plan-name">${p.name}</div>
+            <div class="plan-desc">${p.description || ''}</div>
+            <div class="plan-price">
+              <span class="currency">${(p.currency || 'usd').toUpperCase()}</span>
+              ${parseFloat(p.price).toFixed(0)}
+              <span class="interval">/${p.interval}</span>
+            </div>
+            ${p.trial_days > 0 ? `<div class="plan-trial">🎁 ${p.trial_days}-day free trial</div>` : '<div style="margin-bottom:20px"></div>'}
+            <ul class="plan-features">${features || '<li>All basic features</li>'}</ul>
+            <button class="plan-subscribe-btn ${isCurrentPlan ? 'subscribed' : ''}"
+              onclick="subscribe(${p.id}, '${p.name}')"
+              ${isCurrentPlan ? 'disabled' : ''}
+              ${!TOKEN ? 'disabled' : ''}>
+              ${isCurrentPlan ? '✓ Current Plan' : (TOKEN ? 'Subscribe Now' : 'Login First')}
+            </button>
+          </div>`;
+      }).join('')}</div>`;
+    }
+
+    let currentSubPlanId = null;
+
+    // ── Load Current Subscription ─────────────────────────────
+    async function loadCurrentSubscription() {
+      if (!TOKEN) return;
+      const biz = document.getElementById('businessId').value;
+      const box = document.getElementById('currentSub');
+      try {
+        const res = await fetch(`${API}/subscriptions/business/${biz}`, { headers: authHeaders() });
+        const data = await res.json();
+        if (data.success && data.subscription) {
+          const sub = data.subscription;
+          currentSubId = sub.id;
+          currentSubPlanId = sub.plan?.id || null;
+          box.style.display = 'block';
+          document.getElementById('subDetails').innerHTML = `
+            <div class="sub-detail"><div class="label">Plan</div><div class="value">${sub.plan?.name || '—'}</div></div>
+            <div class="sub-detail"><div class="label">Status</div><div class="value" style="color:${sub.stripe_status === 'active' ? 'var(--success)' : 'var(--gold)'}">${sub.stripe_status.toUpperCase()}</div></div>
+            <div class="sub-detail"><div class="label">Period End</div><div class="value">${sub.current_period_end ? new Date(sub.current_period_end).toLocaleDateString() : '—'}</div></div>
+            <div class="sub-detail"><div class="label">Stripe ID</div><div class="value" style="font-size:.82rem">${sub.stripe_subscription_id}</div></div>
+          `;
+          loadPlans(); // re-render plans with current plan highlighted
+        } else {
+          currentSubId = null; currentSubPlanId = null;
+          box.style.display = 'none';
+          loadPlans();
+        }
+      } catch (e) {
+        box.style.display = 'none';
+      }
+    }
+
+    // ── Subscribe ─────────────────────────────────────────────
+    async function subscribe(planId, planName) {
+      if (!TOKEN) return showToast('Error', 'Please login first', 'error');
+      const biz = document.getElementById('businessId').value;
+      if (!biz) return showToast('Error', 'Enter a Business ID', 'error');
+
+      try {
+        const res = await fetch(`${API}/subscriptions/checkout`, {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({
+            business_id: parseInt(biz),
+            plan_id: planId
+          }),
+        });
+        const data = await res.json();
+        
+        if (data.success && data.checkout_url) {
+          showToast('Redirecting...', `Taking you to Stripe checkout for ${planName}...`, 'success');
+          setTimeout(() => {
+            window.location.href = data.checkout_url;
+          }, 1500);
+        } else {
+          showToast('Error', data.message || 'Checkout failed', 'error');
+        }
+      } catch (e) {
+        showToast('Error', e.message, 'error');
+      }
+    }
+
+    // ── Init ──────────────────────────────────────────────────
+    loadPlans();
+  </script>
+</body>
+</html>
