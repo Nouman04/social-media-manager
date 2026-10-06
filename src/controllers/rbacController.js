@@ -8,6 +8,7 @@ const {
   userPermissionSchema,
   userRoleSchema,
 } = require('../validations/rbacValidation');
+const { getRolesAndPermissions } = require('../helpers/rbacHelper');
 
 module.exports = {
   // Role CRUD
@@ -374,53 +375,12 @@ module.exports = {
   getUserRolesAndPermissions: async (req, res) => {
     try {
       const { userId } = req.params;
-      const user = await User.findByPk(userId, {
-        attributes: ['id', 'name', 'email', 'status', 'business_id'],
-        include: [
-          {
-            model: Role,
-            as: 'roles',
-            attributes: ['id', 'name'],
-            through: { attributes: [] },
-            include: [
-              {
-                model: Permission,
-                as: 'permissions',
-                attributes: ['id', 'name'],
-                through: { attributes: [] },
-              },
-            ],
-          },
-          {
-            model: Permission,
-            as: 'permissions',
-            attributes: ['id', 'name'],
-            through: { attributes: [] },
-          },
-        ],
-      });
-
+      const user = await User.findByPk(userId, { attributes: ['id', 'name', 'email', 'status'] });
       if (!user) {
         return res.status(404).json({ success: false, message: "User not found" });
       }
 
-      const directPermissions = (user.permissions || []).map(p => ({ id: p.id, name: p.name, source: 'direct' }));
-      const rolePermissionsMap = new Map();
-
-      (user.roles || []).forEach(role => {
-        (role.permissions || []).forEach(p => {
-          if (!rolePermissionsMap.has(p.id)) {
-            rolePermissionsMap.set(p.id, { id: p.id, name: p.name, source: `role:${role.name}` });
-          }
-        });
-      });
-
-      const allPermissions = [...directPermissions];
-      rolePermissionsMap.forEach((val) => {
-        if (!allPermissions.some(p => p.id === val.id)) {
-          allPermissions.push(val);
-        }
-      });
+      const access = await getRolesAndPermissions(user.id);
 
       return res.status(200).json({
         success: true,
@@ -429,10 +389,7 @@ module.exports = {
           name: user.name,
           email: user.email,
           status: user.status,
-          business_id: user.business_id,
-          roles: (user.roles || []).map(r => ({ id: r.id, name: r.name })),
-          direct_permissions: directPermissions,
-          all_permissions: allPermissions,
+          ...access,
         },
       });
     } catch (err) {

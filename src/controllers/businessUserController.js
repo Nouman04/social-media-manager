@@ -5,6 +5,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { User, Business, BusinessUser, Subscription, Plan, PlanFeature, sequelize } = require('../../models');
 const { sendInvitationEmail } = require('../helpers/mailService');
+const { getRolesAndPermissions } = require('../helpers/rbacHelper');
 const {
   inviteUserSchema,
   acceptInvitationSchema,
@@ -297,6 +298,8 @@ module.exports = {
         { expiresIn: '24h' }
       );
 
+      const { roles, all_permissions } = await getRolesAndPermissions(user.id);
+
       return res.status(200).json({
         success: true,
         message: 'Invitation accepted. Your account is now active and verified.',
@@ -307,6 +310,8 @@ module.exports = {
           name: user.name,
           email: user.email,
           status: user.status,
+          roles,
+          permissions: all_permissions,
           businesses: memberships.map((m) => ({
             id: m.business?.id,
             name: m.business?.name,

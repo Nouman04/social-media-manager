@@ -1,6 +1,7 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { User, Profile, Business, BusinessUser } = require('../../models');
+const { getRolesAndPermissions } = require('../helpers/rbacHelper');
 const { send2FACodeEmail } = require('../helpers/mailService');
 const {
   signup2FASchema,
@@ -228,6 +229,8 @@ module.exports = {
         include: [{ model: Business, as: 'business', attributes: ['id', 'name', 'is_active'] }],
       });
 
+      const { roles, all_permissions } = await getRolesAndPermissions(user.id);
+
       return res.status(200).json({
         success: true,
         message: "2FA verification successful",
@@ -238,6 +241,8 @@ module.exports = {
           name: user.name,
           email: user.email,
           status: user.status,
+          roles,
+          permissions: all_permissions,
           businesses: memberships.map((m) => ({
             id: m.business?.id,
             name: m.business?.name,
