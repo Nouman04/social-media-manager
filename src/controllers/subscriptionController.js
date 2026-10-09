@@ -6,7 +6,7 @@ const {
   subscriptionUpdateSchema,
 } = require('../validations/planValidation');
 const { syncStripeSubscription } = require('../services/stripeSubscriptionSync');
-const stripe = require('stripe')(process.env.STRIPE_SECRET);
+const stripe = process.env.STRIPE_SECRET ? require('stripe')(process.env.STRIPE_SECRET) : null;
 
 module.exports = {
 

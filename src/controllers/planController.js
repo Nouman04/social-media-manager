@@ -5,7 +5,7 @@ const {
   planCreateSchema,
   planUpdateSchema,
 } = require('../validations/planValidation');
-const stripe = require('stripe')(process.env.STRIPE_SECRET);
+const stripe = process.env.STRIPE_SECRET ? require('stripe')(process.env.STRIPE_SECRET) : null;
 
 module.exports = {
 

@@ -1,6 +1,6 @@
 'use strict';
 
-const stripe = require('stripe')(process.env.STRIPE_SECRET);
+const stripe = process.env.STRIPE_SECRET ? require('stripe')(process.env.STRIPE_SECRET) : null;
 const { Subscription } = require('../../models');
 const { syncStripeSubscription } = require('../services/stripeSubscriptionSync');
 
