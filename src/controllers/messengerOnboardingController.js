@@ -39,15 +39,19 @@ module.exports = {
    * exchanges the code for a Page access token, subscribes this app to the
    * Page, and stores it against their business.
    *
-   * Body: { business_id, code, redirect_uri?, page_id? }
+   * Body: { business_id, code | selection_id, redirect_uri?, page_id? }
+   *
+   * With several Pages and no page_id, nothing is saved yet: the response is
+   * { needs_selection: true, selection_id, available_pages } and the page
+   * re-posts { business_id, selection_id, page_id } for each Page picked.
    */
   completeSignup: async (req, res) => {
     try {
-      const { business_id, code, page_id, redirect_uri } = req.body;
+      const { business_id, code, selection_id, page_id, redirect_uri } = req.body;
 
       const missing = [];
       if (!business_id) missing.push('business_id is required');
-      if (!code) missing.push('code is required (from the Facebook popup)');
+      if (!code && !selection_id) missing.push('code (from the Facebook popup) or selection_id is required');
 
       if (missing.length) {
         return res.status(400).json({ success: false, message: 'Validation failed', details: missing });
@@ -66,9 +70,14 @@ module.exports = {
 
       const result = await onboarding.completeEmbeddedSignup(business_id, {
         code,
+        selection_id,
         redirect_uri,
         page_id,
-      });
+      }, req.user.id);
+
+      if (result.needs_selection) {
+        return res.status(200).json({ success: true, message: 'Choose which Page to connect', ...result });
+      }
 
       return res.status(201).json({
         success: true,

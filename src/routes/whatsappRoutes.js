@@ -75,6 +75,15 @@ router.get('/business-profile', whatsappController.getBusinessProfile);
 router.post('/business-profile', whatsappController.updateProfile);
 
 // ─── ACCOUNT MANAGEMENT ─────────────────────────────────────────────────────────
+// A business can connect several numbers. Every endpoint below accepts an
+// optional account_id (whatsapp_details.id) to pick one; it is required only
+// once the business has more than one active number.
+
+/**
+ * GET /api/v1/whatsapp/accounts?business_id=
+ * List every connected WhatsApp number (access tokens withheld).
+ */
+router.get('/accounts', whatsappController.listAccounts);
 
 /**
  * POST /api/v1/whatsapp/account

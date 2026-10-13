@@ -51,6 +51,16 @@ router.use(authenticate);
  */
 router.get('/verify-credentials', messengerController.verifyCredentials);
 
+// A business can connect several Facebook Pages. Every endpoint below accepts
+// an optional account_id (messenger_details.id) to pick one; it is required
+// only once the business has more than one active Page.
+
+/**
+ * GET /api/v1/messenger/accounts?business_id=
+ * List every connected Facebook Page (access tokens withheld).
+ */
+router.get('/accounts', messengerController.listAccounts);
+
 /**
  * POST /api/v1/messenger/account
  * Connect a Facebook Page.

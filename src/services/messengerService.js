@@ -4,6 +4,7 @@ const axios = require('axios');
 const { Op } = require('sequelize');
 const { MessengerDetail, MessengerMessage, Conversation, Business } = require('../../models');
 const { findOrCreateConversation, getPlatformId } = require('../helpers/conversationHelper');
+const { resolveAccount, listAccounts } = require('../helpers/accountHelper');
 const realtime = require('../helpers/realtime');
 
 const GRAPH_API_BASE = 'https://graph.facebook.com/v18.0';
@@ -40,21 +41,14 @@ const wrapMetaError = (apiErr, context) => {
 };
 
 /**
- * Fetch active MessengerDetail for a tenant (business_id). Throws if none.
+ * Fetch the active MessengerDetail (one connected Page) a request acts
+ * through. See resolveAccount for how account_id is chosen.
  * @param {number} businessId
+ * @param {number} [accountId] - messenger_details.id
  * @returns {Promise<MessengerDetail>}
  */
-const getTenantCredentials = async (businessId) => {
-  const detail = await MessengerDetail.findOne({
-    where: { business_id: businessId, is_active: true },
-  });
-  if (!detail) {
-    const err = new Error(`No active Messenger credentials found for business_id=${businessId}`);
-    err.statusCode = 404;
-    throw err;
-  }
-  return detail;
-};
+const getTenantCredentials = (businessId, accountId = null) =>
+  resolveAccount(MessengerDetail, businessId, accountId, 'Messenger');
 
 /**
  * Persist an outbound message as 'queued' against its conversation.
@@ -93,6 +87,7 @@ const emitOutbound = async (record) => {
       message: record.toJSON(),
       conversation: {
         id: conversation.id,
+        account_id: conversation.account_id,
         contact_identifier: conversation.contact_identifier,
         contact_name: conversation.contact_name,
       },
@@ -117,11 +112,12 @@ const markFailed = async (record, errorCode, errorMessage) => {
  * @param {object} args.messageBody    - The `message` object sent to Meta.
  * @param {string} [args.messagingType]- RESPONSE (default) / UPDATE / MESSAGE_TAG.
  * @param {string} [args.messageTag]   - Required when messagingType is MESSAGE_TAG.
+ * @param {number} [args.accountId]    - messenger_details.id (the Page) to send from.
  * @returns {Promise<{record: MessengerMessage, metaResponse: object}>}
  */
 const dispatchMessage = async ({
   businessId, toPsid, messageType, messageBody,
-  messagingType = 'RESPONSE', messageTag = null, senderId = null, receiverId = null,
+  messagingType = 'RESPONSE', messageTag = null, senderId = null, receiverId = null, accountId = null,
 }) => {
   if (!PSID_RE.test(toPsid)) {
     const err = new Error(`Invalid Page-Scoped ID: "${toPsid}". Must be a numeric PSID.`);
@@ -142,11 +138,12 @@ const dispatchMessage = async ({
     throw err;
   }
 
-  const detail = await getTenantCredentials(businessId);
+  const detail = await getTenantCredentials(businessId, accountId);
 
   const conversation = await findOrCreateConversation({
     businessId,
     platformName: PLATFORM,
+    accountId: detail.id,
     contactIdentifier: toPsid,
     createdBy: senderId,
   });
@@ -256,10 +253,15 @@ const messengerService = {
   },
 
   /**
-   * Return the connected Page for a tenant. The access token is withheld.
+   * Every Facebook Page the business has connected (tokens withheld).
    */
-  getAccount: async (businessId) => {
-    const detail = await getTenantCredentials(businessId);
+  listAccounts: (businessId) => listAccounts(MessengerDetail, businessId),
+
+  /**
+   * Return one connected Page for a tenant. The access token is withheld.
+   */
+  getAccount: async (businessId, accountId = null) => {
+    const detail = await getTenantCredentials(businessId, accountId);
     const plain = detail.toJSON();
     delete plain.access_token;
     return plain;
@@ -269,8 +271,8 @@ const messengerService = {
    * Update a connected Page — typically to rotate an expiring token.
    * Any new token is verified before it replaces the stored one.
    */
-  updateAccount: async (businessId, { access_token, is_active }) => {
-    const detail = await getTenantCredentials(businessId);
+  updateAccount: async (businessId, { access_token, is_active }, accountId = null) => {
+    const detail = await getTenantCredentials(businessId, accountId);
 
     const updates = {};
     if (is_active !== undefined) updates.is_active = is_active;
@@ -296,10 +298,10 @@ const messengerService = {
   /**
    * Disconnect a Page (soft delete — message history is kept).
    */
-  deleteAccount: async (businessId) => {
-    const detail = await getTenantCredentials(businessId);
+  deleteAccount: async (businessId, accountId = null) => {
+    const detail = await getTenantCredentials(businessId, accountId);
     await detail.destroy();
-    return { business_id: businessId, page_id: detail.page_id, disconnected: true };
+    return { business_id: businessId, account_id: detail.id, page_id: detail.page_id, disconnected: true };
   },
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -309,8 +311,8 @@ const messengerService = {
   /**
    * Fetch the connected Page's own profile from Meta.
    */
-  getProfile: async (businessId) => {
-    const detail = await getTenantCredentials(businessId);
+  getProfile: async (businessId, accountId = null) => {
+    const detail = await getTenantCredentials(businessId, accountId);
     const url = `${GRAPH_API_BASE}/${detail.page_id}`;
     const params = {
       fields: 'id,name,username,about,category,link,picture,fan_count,followers_count',
@@ -327,8 +329,8 @@ const messengerService = {
    * Fetch a contact's profile by their Page-Scoped ID.
    * Useful for showing a name/avatar next to an inbound conversation.
    */
-  getContactProfile: async (businessId, psid) => {
-    const detail = await getTenantCredentials(businessId);
+  getContactProfile: async (businessId, psid, accountId = null) => {
+    const detail = await getTenantCredentials(businessId, accountId);
     const url = `${GRAPH_API_BASE}/${psid}`;
     const params = { fields: 'first_name,last_name,profile_pic,locale,timezone' };
     try {
@@ -351,7 +353,7 @@ const messengerService = {
    * messaging_type = MESSAGE_TAG with a valid tag (e.g. HUMAN_AGENT).
    */
   sendTextMessage: async (businessId, toPsid, text, {
-    messagingType = 'RESPONSE', messageTag = null, senderId = null, receiverId = null,
+    messagingType = 'RESPONSE', messageTag = null, senderId = null, receiverId = null, accountId = null,
   } = {}) => {
     if (!text || !String(text).trim()) {
       const err = new Error('Message text is required.');
@@ -368,6 +370,7 @@ const messengerService = {
       messageTag,
       senderId,
       receiverId,
+      accountId,
     });
   },
 
@@ -379,7 +382,7 @@ const messengerService = {
    * Send an image / video / audio / file attachment by public URL.
    */
   sendMediaMessage: async (businessId, toPsid, mediaType, mediaUrl, {
-    messagingType = 'RESPONSE', messageTag = null, senderId = null, receiverId = null,
+    messagingType = 'RESPONSE', messageTag = null, senderId = null, receiverId = null, accountId = null,
   } = {}) => {
     const VALID_TYPES = ['image', 'video', 'audio', 'file'];
     if (!VALID_TYPES.includes(mediaType)) {
@@ -407,6 +410,7 @@ const messengerService = {
       messageTag,
       senderId,
       receiverId,
+      accountId,
     });
   },
 
@@ -420,7 +424,7 @@ const messengerService = {
    * @param {Array} quickReplies - [{ title, payload }, ...] (max 13 per Meta).
    */
   sendQuickReplies: async (businessId, toPsid, text, quickReplies, {
-    messagingType = 'RESPONSE', messageTag = null, senderId = null, receiverId = null,
+    messagingType = 'RESPONSE', messageTag = null, senderId = null, receiverId = null, accountId = null,
   } = {}) => {
     if (!Array.isArray(quickReplies) || quickReplies.length === 0) {
       const err = new Error('quick_replies must be a non-empty array of { title, payload }.');
@@ -456,6 +460,7 @@ const messengerService = {
       messageTag,
       senderId,
       receiverId,
+      accountId,
     });
   },
 
@@ -467,7 +472,7 @@ const messengerService = {
    * Send a sender action: mark_seen, typing_on, or typing_off.
    * These are UI signals only — nothing is persisted.
    */
-  sendSenderAction: async (businessId, toPsid, senderAction) => {
+  sendSenderAction: async (businessId, toPsid, senderAction, accountId = null) => {
     const VALID_ACTIONS = ['mark_seen', 'typing_on', 'typing_off'];
     if (!VALID_ACTIONS.includes(senderAction)) {
       const err = new Error(`Invalid sender_action "${senderAction}". Must be one of: ${VALID_ACTIONS.join(', ')}.`);
@@ -475,7 +480,7 @@ const messengerService = {
       throw err;
     }
 
-    const detail = await getTenantCredentials(businessId);
+    const detail = await getTenantCredentials(businessId, accountId);
     const payload = { recipient: { id: toPsid }, sender_action: senderAction };
     const url = `${GRAPH_API_BASE}/${detail.page_id}/messages`;
 
@@ -493,12 +498,16 @@ const messengerService = {
 
   /**
    * List Messenger conversation threads for a tenant, newest activity first.
+   * accountId narrows the list to one connected Page; omit it for all.
    */
-  getConversations: async (businessId, { limit = 50, offset = 0 } = {}) => {
+  getConversations: async (businessId, { limit = 50, offset = 0, accountId = null } = {}) => {
     const socialPlatformId = await getPlatformId(PLATFORM);
 
+    const where = { business_id: businessId, social_platform_id: socialPlatformId };
+    if (accountId) where.account_id = accountId;
+
     const { rows, count } = await Conversation.findAndCountAll({
-      where: { business_id: businessId, social_platform_id: socialPlatformId },
+      where,
       order: [['updated_at', 'DESC']],
       limit: Number(limit),
       offset: Number(offset),
@@ -678,6 +687,7 @@ const messengerService = {
     const conversation = await findOrCreateConversation({
       businessId: tenantId,
       platformName: PLATFORM,
+      accountId: detail.id,
       contactIdentifier: String(contactPsid),
       createdBy: ownerId,
     });
@@ -707,6 +717,7 @@ const messengerService = {
         message: saved.toJSON(),
         conversation: {
           id: conversation.id,
+          account_id: conversation.account_id,
           contact_identifier: conversation.contact_identifier,
           contact_name: conversation.contact_name || null,
         },
@@ -729,6 +740,7 @@ const messengerService = {
       where: {
         business_id: detail.business_id,
         social_platform_id: await getPlatformId(PLATFORM),
+        account_id: detail.id,
         contact_identifier: String(event?.sender?.id || ''),
       },
     });

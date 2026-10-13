@@ -27,7 +27,7 @@ const getPlatformId = async (name) => {
 
 /**
  * Find — or create — the conversation thread for one external contact on one
- * platform for one business.
+ * connected account (WhatsApp number / Page / Instagram account) of a business.
  *
  * Every message row hangs off a conversation, so both the outbound send paths
  * and the inbound webhook handlers call this before persisting anything.
@@ -35,6 +35,7 @@ const getPlatformId = async (name) => {
  * @param {object}  args
  * @param {number}  args.businessId       - Tenant.
  * @param {string}  args.platformName     - e.g. 'whatsapp' | 'instagram'.
+ * @param {number}  args.accountId        - The *Detail row id the thread runs through.
  * @param {string}  args.contactIdentifier- Phone number (WhatsApp) or scoped user id (Instagram).
  * @param {string} [args.contactName]     - Display name, when the platform gives one.
  * @param {number} [args.createdBy]       - System user to record as creator; falls back to the business owner.
@@ -43,6 +44,7 @@ const getPlatformId = async (name) => {
 const findOrCreateConversation = async ({
   businessId,
   platformName,
+  accountId,
   contactIdentifier,
   contactName = null,
   createdBy = null,
@@ -53,15 +55,14 @@ const findOrCreateConversation = async ({
     throw err;
   }
 
-  const socialPlatformId = await getPlatformId(platformName);
+  const where = {
+    business_id: businessId,
+    social_platform_id: await getPlatformId(platformName),
+    account_id: accountId,
+    contact_identifier: contactIdentifier,
+  };
 
-  const existing = await Conversation.findOne({
-    where: {
-      business_id: businessId,
-      social_platform_id: socialPlatformId,
-      contact_identifier: contactIdentifier,
-    },
-  });
+  const existing = await Conversation.findOne({ where });
 
   if (existing) {
     // Keep the display name fresh — contacts rename themselves.
@@ -86,9 +87,7 @@ const findOrCreateConversation = async ({
 
   try {
     const conversation = await Conversation.create({
-      business_id: businessId,
-      social_platform_id: socialPlatformId,
-      contact_identifier: contactIdentifier,
+      ...where,
       contact_name: contactName,
       type: 'private',
       created_by: creatorId,
@@ -104,15 +103,9 @@ const findOrCreateConversation = async ({
     return conversation;
   } catch (dbErr) {
     // Two webhook events for a brand-new contact can race here; the unique
-    // index on (business, platform, contact) makes the loser retry the read.
+    // index on (business, platform, account, contact) makes the loser retry the read.
     if (dbErr?.name === 'SequelizeUniqueConstraintError') {
-      const raced = await Conversation.findOne({
-        where: {
-          business_id: businessId,
-          social_platform_id: socialPlatformId,
-          contact_identifier: contactIdentifier,
-        },
-      });
+      const raced = await Conversation.findOne({ where });
       if (raced) return raced;
     }
     throw dbErr;

@@ -80,6 +80,15 @@
   code { background: #eceef1; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
   .step { display: none; }
   .step.active { display: block; }
+  .pagepick { margin-top: 14px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; display: none; }
+  .pagepick.show { display: block; }
+  .pagepick .item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 13px; cursor: pointer;
+  }
+  .pagepick .item:last-child { border-bottom: 0; }
+  .pagepick .item:hover { background: #f7f8fa; }
+  .pagepick .item small { color: var(--muted); display: block; }
 </style>
 </head>
 <body>
@@ -127,6 +136,8 @@
         <span id="btnText">Loading…</span>
       </button>
 
+      <div id="numberpick" class="pagepick"></div>
+
       <div id="detail" class="detail">
         <h2>Account details</h2>
         <dl id="detailList"></dl>
@@ -162,6 +173,9 @@
   var cfg = null;
   var auth = { token: null, user: null };
   var popup = null;
+  // The Facebook code is single-use; the server hands back a selection_id
+  // instead, so picking more numbers needs no second popup.
+  var selectionId = null;
 
   var $ = function (id) { return document.getElementById(id); };
 
@@ -275,6 +289,8 @@
 
   $('business').addEventListener('change', function () {
     $('detail').className = 'detail';
+    $('numberpick').className = 'pagepick';
+    selectionId = null; // bound to the previous business on the server
     say('');
     showExisting();
   });
@@ -373,22 +389,33 @@
     if (d.error) { say('Facebook returned: ' + d.error, 'error'); return; }
     if (!d.code) { say('No authorization code was returned.', 'error'); return; }
 
-    submitCode(d.code);
+    selectionId = null;
+    submit({ code: d.code });
   });
 
-  function submitCode(code) {
+  // body: { code } right after the popup, or { selection_id, phone_number_id } from the picker.
+  function submit(body) {
     setBtn('Saving…', true);
     say('Linking your account…');
 
-    post('/api/v1/whatsapp/embedded-signup', {
-      business_id: Number($('business').value),
-      code: code,
-      // Meta ties the code to this exact value — replay it on the exchange.
-      redirect_uri: REDIRECT_URI
-    }, auth.token)
+    body.business_id = Number($('business').value);
+    // Meta ties the code to this exact value — replay it on the exchange.
+    body.redirect_uri = REDIRECT_URI;
+
+    post('/api/v1/whatsapp/embedded-signup', body, auth.token)
       .then(function (res) {
         setBtn('Reconnect with Facebook', false);
         if (!res.ok) { say(res.body.message || 'Connection failed.', 'error'); return; }
+
+        if (res.body.selection_id) selectionId = res.body.selection_id;
+        var numbers = res.body.available_numbers || [];
+
+        if (res.body.needs_selection) {
+          renderNumberPicker(numbers);
+          say('<strong>Choose the WhatsApp number(s) to connect.</strong>', 'info');
+          return;
+        }
+
         var a = res.body.account || {};
         render({
           'WhatsApp number': res.body.display_phone_number,
@@ -397,9 +424,43 @@
           'WABA ID': a.waba_id,
           'Status': a.account_status
         });
-        say('<strong>Connected.</strong> Your WhatsApp account details have been saved.', 'ok');
+        say('<strong>Connected.</strong> ' + (res.body.display_phone_number || 'Your number') + ' has been saved.' +
+            (numbers.some(function (n) { return !n.connected; }) ? ' You can connect another number below.' : ''), 'ok');
+
+        if (numbers.length) renderNumberPicker(numbers);
       })
       .catch(function (e) { setBtn('Continue with Facebook', false); say('Request failed: ' + e.message, 'error'); });
+  }
+
+  function renderNumberPicker(numbers) {
+    var box = $('numberpick');
+    box.innerHTML = '';
+    var head = document.createElement('div');
+    head.style.cssText = 'padding:8px 12px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--line)';
+    head.textContent = 'WhatsApp numbers this Facebook account manages:';
+    box.appendChild(head);
+
+    numbers.forEach(function (n) {
+      var row = document.createElement('div');
+      row.className = 'item';
+      var name = document.createElement('span');
+      name.textContent = n.display_phone_number || n.phone_number_id;
+      var sub = document.createElement('small');
+      sub.textContent = (n.verified_name || '') + ' · WABA ' + n.waba_id;
+      name.appendChild(sub);
+      var action = document.createElement('span');
+      action.textContent = n.connected ? 'Connected ✓' : 'Connect →';
+      row.appendChild(name);
+      row.appendChild(action);
+      if (!n.connected) {
+        row.addEventListener('click', function () {
+          if (!selectionId) { say('Continue with Facebook again to pick a number.', 'warn'); return; }
+          submit({ selection_id: selectionId, phone_number_id: n.phone_number_id });
+        });
+      }
+      box.appendChild(row);
+    });
+    box.className = 'pagepick show';
   }
 
   if (auth.token && auth.user) enterConnectStep();

@@ -59,6 +59,16 @@ router.get('/verify-credentials', instagramController.verifyCredentials);
 // which carries no business_id of its own.
 router.use(authorizeBusiness);
 
+// A business can connect several Instagram accounts. Every endpoint below
+// accepts an optional account_id (instagram_details.id) to pick one; it is
+// required only once the business has more than one active account.
+
+/**
+ * GET /api/v1/instagram/accounts?business_id=
+ * List every connected Instagram account (access tokens withheld).
+ */
+router.get('/accounts', instagramController.listAccounts);
+
 /**
  * POST /api/v1/instagram/account
  * Connect an Instagram Professional account.

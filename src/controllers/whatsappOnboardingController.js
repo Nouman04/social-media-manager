@@ -38,15 +38,19 @@ module.exports = {
    * exchanges the code for a long-lived token, subscribes this app to their
    * WABA, registers the number, and stores it against their business.
    *
-   * Body: { business_id, code, redirect_uri?, waba_id?, phone_number_id?, pin? }
+   * Body: { business_id, code | selection_id, redirect_uri?, waba_id?, phone_number_id?, pin? }
+   *
+   * With several numbers and none chosen, nothing is saved yet: the response
+   * is { needs_selection: true, selection_id, available_numbers } and the page
+   * re-posts { business_id, selection_id, phone_number_id } for each pick.
    */
   completeSignup: async (req, res) => {
     try {
-      const { business_id, code, waba_id, phone_number_id, pin, redirect_uri } = req.body;
+      const { business_id, code, selection_id, waba_id, phone_number_id, pin, redirect_uri } = req.body;
 
       const missing = [];
       if (!business_id)     missing.push('business_id is required');
-      if (!code)            missing.push('code is required (from the Facebook popup)');
+      if (!code && !selection_id) missing.push('code (from the Facebook popup) or selection_id is required');
       // waba_id / phone_number_id are optional: when the browser fails to
       // report them, the service reads them back from the exchanged token.
 
@@ -67,11 +71,16 @@ module.exports = {
 
       const result = await onboarding.completeEmbeddedSignup(business_id, {
         code,
+        selection_id,
         redirect_uri,
         waba_id,
         phone_number_id,
         pin,
-      });
+      }, req.user.id);
+
+      if (result.needs_selection) {
+        return res.status(200).json({ success: true, message: 'Choose which WhatsApp number to connect', ...result });
+      }
 
       return res.status(201).json({
         success: true,

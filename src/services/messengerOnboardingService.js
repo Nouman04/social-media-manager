@@ -2,6 +2,8 @@
 
 const axios = require('axios');
 const { MessengerDetail, Business } = require('../../models');
+const pendingSignup = require('../helpers/pendingSignup');
+const { getAllPages } = require('../helpers/graphPaging');
 
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || 'v21.0';
 const GRAPH_API_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
@@ -87,12 +89,11 @@ const messengerOnboardingService = {
    * @returns {Promise<Array<{id, name, access_token}>>}
    */
   listPages: async (userAccessToken) => {
-    const url = `${GRAPH_API_BASE}/me/accounts`;
     try {
-      const response = await axios.get(url, {
-        params: { fields: 'id,name,access_token', access_token: userAccessToken },
+      return await getAllPages(`${GRAPH_API_BASE}/me/accounts`, {
+        fields: 'id,name,access_token',
+        access_token: userAccessToken,
       });
-      return response.data?.data || [];
     } catch (apiErr) {
       throw wrapMetaError(apiErr, 'listPages');
     }
@@ -119,13 +120,16 @@ const messengerOnboardingService = {
   /**
    * Run the whole Embedded Signup exchange and persist the result.
    *
+   * Without a page_id nothing is saved: the Pages come back with
+   * needs_selection and a selection_id (even when there is only one), and the
+   * caller re-posts { selection_id, page_id } once per Page to connect.
+   *
    * @param {number} businessId  - Tenant the account is being connected to.
-   * @param {object} payload     - { code, redirect_uri?, page_id? }
-   *                                page_id lets the caller pick a specific Page
-   *                                when the login granted access to several.
-   * @returns {Promise<object>}  - Stored account (without the token).
+   * @param {object} payload     - { code | selection_id, redirect_uri?, page_id? }
+   * @param {number} userId      - Signed-in user; a selection_id only works for them.
+   * @returns {Promise<object>}  - Stored account (without the token), or the Page list.
    */
-  completeEmbeddedSignup: async (businessId, { code, page_id = null, redirect_uri = null }) => {
+  completeEmbeddedSignup: async (businessId, { code, selection_id = null, page_id = null, redirect_uri = null }, userId) => {
     const business = await Business.findByPk(businessId);
     if (!business) {
       const err = new Error(`Business not found for business_id=${businessId}`);
@@ -133,11 +137,36 @@ const messengerOnboardingService = {
       throw err;
     }
 
-    // 2. code -> user access token
-    const userAccessToken = await messengerOnboardingService.exchangeCodeForToken(code, redirect_uri);
+    // 2. code -> user access token (or the one kept from an earlier login)
+    let userAccessToken;
+    if (selection_id) {
+      const entry = pendingSignup.load(selection_id, { userId, businessId });
+      if (!entry) throw pendingSignup.expiredError();
+      userAccessToken = entry.userAccessToken;
+    } else {
+      userAccessToken = await messengerOnboardingService.exchangeCodeForToken(code, redirect_uri);
+    }
 
     // 3. find the Page this login grants access to
     const pages = await messengerOnboardingService.listPages(userAccessToken);
+
+    const selectionId = selection_id
+      || (pages.length ? pendingSignup.save({ userId, businessId, userAccessToken }) : null);
+
+    const connected = new Set((await MessengerDetail.findAll({
+      where: { business_id: businessId, page_id: pages.map((p) => String(p.id)) },
+      attributes: ['page_id'],
+    })).map((d) => String(d.page_id)));
+    const availablePages = () => pages.map((p) => ({
+      page_id: p.id,
+      page_name: p.name,
+      connected: connected.has(String(p.id)),
+    }));
+
+    // No choice yet — always let the user pick, even from a single Page.
+    if (!page_id && pages.length) {
+      return { needs_selection: true, selection_id: selectionId, available_pages: availablePages() };
+    }
 
     let page = page_id
       ? pages.find((p) => String(p.id) === String(page_id))
@@ -193,13 +222,15 @@ const messengerOnboardingService = {
 
     const plain = detail.toJSON();
     delete plain.access_token;
+    connected.add(String(page.id));
 
     return {
       account: plain,
       page_name: page.name || null,
-      // Every Page the login granted access to — lets the connect page offer
-      // a picker when there's more than one.
-      available_pages: pages.map((p) => ({ page_id: p.id, page_name: p.name })),
+      // Every Page the login granted access to, plus the selection_id that
+      // connects another one without reopening the Facebook popup.
+      selection_id: selectionId,
+      available_pages: availablePages(),
     };
   },
 };

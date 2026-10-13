@@ -17,6 +17,11 @@ module.exports = (sequelize, DataTypes) => {
       onUpdate: 'CASCADE',
       onDelete: 'CASCADE',
     },
+    waba_id: {
+      type: DataTypes.STRING(64),
+      allowNull: true,
+      comment: 'WhatsApp Business Account the template lives in',
+    },
 
     // ── Meta identifiers ────────────────────────────────────────────────────
     meta_template_id: {

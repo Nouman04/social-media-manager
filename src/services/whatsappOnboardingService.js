@@ -2,6 +2,7 @@
 
 const axios = require('axios');
 const { WhatsappDetail, Business } = require('../../models');
+const pendingSignup = require('../helpers/pendingSignup');
 
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || 'v21.0';
 const GRAPH_API_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
@@ -144,56 +145,70 @@ const whatsappOnboardingService = {
   },
 
   /**
-   * Work out which WABA and phone number a token grants access to.
+   * Every WhatsApp number a token grants access to, across all its WABAs.
    *
-   * The browser normally reports these via the WA_EMBEDDED_SIGNUP postMessage,
-   * but that can be missed (popup blockers, browser quirks, a flow that ended
-   * early). debug_token exposes the same information server-side through the
-   * granular scopes attached to the token, so onboarding does not have to
-   * depend on the front end getting it right.
+   * The browser only reports a WABA/number via the WA_EMBEDDED_SIGNUP
+   * postMessage, and a Login-for-Business grant ("all current and future
+   * WhatsApp accounts") may cover several. debug_token's granular scopes name
+   * every WABA, and each lists its own numbers — so the user can choose
+   * instead of us silently taking the first one.
    *
    * @param {string} accessToken
-   * @returns {Promise<{waba_id: string|null, phone_number_id: string|null}>}
+   * @returns {Promise<Array<{waba_id, phone_number_id, display_phone_number, verified_name}>>}
    */
-  discoverAccount: async (accessToken) => {
+  listNumbers: async (accessToken) => {
     const { appId, appSecret } = requireAppCredentials();
-    let wabaId = null;
+    let wabaIds;
 
     try {
       const res = await axios.get(GRAPH_API_BASE + '/debug_token', {
         params: { input_token: accessToken, access_token: appId + '|' + appSecret },
       });
-      const scopes = res.data?.data?.granular_scopes || [];
-      const waScope = scopes.find((s) => s.scope === 'whatsapp_business_management')
-        || scopes.find((s) => s.scope === 'whatsapp_business_messaging');
-      wabaId = waScope?.target_ids?.[0] || null;
+      const scopes = (res.data?.data?.granular_scopes || [])
+        .filter((s) => s.scope === 'whatsapp_business_management' || s.scope === 'whatsapp_business_messaging');
+      wabaIds = [...new Set(scopes.flatMap((s) => s.target_ids || []).map(String))];
     } catch (apiErr) {
-      throw wrapMetaError(apiErr, 'discoverAccount');
+      throw wrapMetaError(apiErr, 'listNumbers');
     }
 
-    if (!wabaId) return { waba_id: null, phone_number_id: null };
+    const perWaba = await Promise.all(wabaIds.map(async (wabaId) => {
+      try {
+        const res = await axios.get(GRAPH_API_BASE + '/' + wabaId + '/phone_numbers', {
+          headers: { Authorization: 'Bearer ' + accessToken },
+          params: { fields: 'id,display_phone_number,verified_name' },
+        });
+        return (res.data?.data || []).map((n) => ({
+          waba_id: wabaId,
+          phone_number_id: String(n.id),
+          display_phone_number: n.display_phone_number || null,
+          verified_name: n.verified_name || null,
+        }));
+      } catch (apiErr) {
+        // One unreadable WABA shouldn't hide the numbers in the others.
+        console.warn(`[whatsappOnboarding.listNumbers] Could not list numbers for WABA ${wabaId}:`, apiErr.message);
+        return [];
+      }
+    }));
 
-    try {
-      const res = await axios.get(GRAPH_API_BASE + '/' + wabaId + '/phone_numbers', {
-        headers: { Authorization: 'Bearer ' + accessToken },
-        params: { fields: 'id,display_phone_number,verified_name' },
-      });
-      const first = (res.data?.data || [])[0];
-      return { waba_id: wabaId, phone_number_id: first?.id || null };
-    } catch (apiErr) {
-      console.warn('[whatsappOnboarding.discoverAccount] Could not list phone numbers:', apiErr.message);
-      return { waba_id: wabaId, phone_number_id: null };
-    }
+    return perWaba.flat();
   },
 
   /**
    * Run the whole Embedded Signup exchange and persist the result.
    *
+   * When the browser did not report a number, nothing is saved: the numbers
+   * come back with needs_selection and a selection_id (even when there is
+   * only one), and the caller re-posts { selection_id, phone_number_id }
+   * once per number to connect.
+   *
    * @param {number} businessId  - Tenant the account is being connected to.
-   * @param {object} payload     - { code, redirect_uri?, waba_id?, phone_number_id?, pin? }
-   * @returns {Promise<object>}  - Stored account (without the token).
+   * @param {object} payload     - { code | selection_id, redirect_uri?, waba_id?, phone_number_id?, pin? }
+   * @param {number} userId      - Signed-in user; a selection_id only works for them.
+   * @returns {Promise<object>}  - Stored account (without the token), or the number list.
    */
-  completeEmbeddedSignup: async (businessId, { code, waba_id, phone_number_id, pin = null, redirect_uri = null }) => {
+  completeEmbeddedSignup: async (businessId, {
+    code, selection_id = null, waba_id, phone_number_id, pin = null, redirect_uri = null,
+  }, userId) => {
     const business = await Business.findByPk(businessId);
     if (!business) {
       const err = new Error(`Business not found for business_id=${businessId}`);
@@ -201,23 +216,50 @@ const whatsappOnboardingService = {
       throw err;
     }
 
-    // 2. code -> long-lived access token (done first: the token is what lets us
-    // discover the account when the browser did not report it).
-    const accessToken = await whatsappOnboardingService.exchangeCodeForToken(code, redirect_uri);
+    // 2. code -> long-lived access token (or the one kept from an earlier login)
+    let accessToken;
+    if (selection_id) {
+      const entry = pendingSignup.load(selection_id, { userId, businessId });
+      if (!entry) throw pendingSignup.expiredError();
+      accessToken = entry.userAccessToken;
+    } else {
+      accessToken = await whatsappOnboardingService.exchangeCodeForToken(code, redirect_uri);
+    }
 
-    // The WA_EMBEDDED_SIGNUP postMessage is the normal source of these ids, but
-    // it can be missed. Fall back to reading them from the token itself.
+    // The WA_EMBEDDED_SIGNUP postMessage names exactly one WABA + number. When
+    // it didn't (missed, or a plain Login-for-Business grant), read every
+    // number the token covers and let the user choose.
+    let numbers = [];
+    let selectionId = selection_id;
     if (!waba_id || !phone_number_id) {
-      const found = await whatsappOnboardingService.discoverAccount(accessToken);
-      waba_id = waba_id || found.waba_id;
-      phone_number_id = phone_number_id || found.phone_number_id;
-      console.log(`[whatsappOnboarding] Discovered from token | waba=${waba_id} | phone=${phone_number_id}`);
+      numbers = await whatsappOnboardingService.listNumbers(accessToken);
+      const candidates = numbers.filter((n) =>
+        (!phone_number_id || n.phone_number_id === String(phone_number_id))
+        && (!waba_id || n.waba_id === String(waba_id)));
+
+      if (!selectionId && numbers.length) {
+        selectionId = pendingSignup.save({ userId, businessId, userAccessToken: accessToken });
+      }
+
+      // No choice yet — always let the user pick, even from a single number.
+      if (!phone_number_id && candidates.length) {
+        return {
+          needs_selection: true,
+          selection_id: selectionId,
+          available_numbers: await markConnected(businessId, numbers),
+        };
+      }
+
+      waba_id = candidates[0]?.waba_id || null;
+      phone_number_id = candidates[0]?.phone_number_id || null;
     }
 
     if (!waba_id || !phone_number_id) {
       const err = new Error(
-        'Could not determine the WhatsApp account from this login. '
-        + 'Make sure a phone number was added during the Facebook flow, then try again.'
+        phone_number_id
+          ? `phone_number_id "${phone_number_id}" is not among the numbers this login granted access to.`
+          : 'Could not determine the WhatsApp account from this login. '
+            + 'Make sure a phone number was added during the Facebook flow, then try again.'
       );
       err.statusCode = 422;
       throw err;
@@ -280,8 +322,22 @@ const whatsappOnboardingService = {
       display_phone_number: info.display_phone_number || null,
       phone_registered: registration.registered,
       already_registered: Boolean(registration.alreadyRegistered),
+      // Other numbers this login covers, plus the selection_id that connects
+      // another one without reopening the Facebook popup.
+      selection_id: selectionId,
+      available_numbers: await markConnected(businessId, numbers),
     };
   },
+};
+
+/** Flag which of a login's numbers this business has already connected. */
+const markConnected = async (businessId, numbers) => {
+  if (!numbers.length) return [];
+  const connected = new Set((await WhatsappDetail.findAll({
+    where: { business_id: businessId, phone_number_id: numbers.map((n) => n.phone_number_id) },
+    attributes: ['phone_number_id'],
+  })).map((d) => String(d.phone_number_id)));
+  return numbers.map((n) => ({ ...n, connected: connected.has(n.phone_number_id) }));
 };
 
 module.exports = whatsappOnboardingService;

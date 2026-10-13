@@ -78,17 +78,36 @@ module.exports = {
   },
 
   /**
-   * GET /api/v1/instagram/account?business_id=
-   * Return the connected account (access token withheld).
+   * GET /api/v1/instagram/accounts?business_id=
+   * Every connected Instagram account (tokens withheld). Their `id` is the
+   * account_id the other endpoints accept.
    */
-  getAccount: async (req, res) => {
+  listAccounts: async (req, res) => {
     try {
       const { business_id } = req.query;
       if (!business_id) {
         return res.status(400).json({ success: false, message: 'Validation failed', details: ['business_id is required'] });
       }
 
-      const account = await instagramService.getAccount(business_id);
+      const accounts = await instagramService.listAccounts(business_id);
+      return res.status(200).json({ success: true, count: accounts.length, accounts });
+    } catch (err) {
+      return fail(res, err, 'listAccounts');
+    }
+  },
+
+  /**
+   * GET /api/v1/instagram/account?business_id=&account_id=
+   * Return one connected account (access token withheld).
+   */
+  getAccount: async (req, res) => {
+    try {
+      const { business_id, account_id = null } = req.query;
+      if (!business_id) {
+        return res.status(400).json({ success: false, message: 'Validation failed', details: ['business_id is required'] });
+      }
+
+      const account = await instagramService.getAccount(business_id, account_id);
       return res.status(200).json({ success: true, account });
     } catch (err) {
       return fail(res, err, 'getAccount');
@@ -99,16 +118,18 @@ module.exports = {
    * PUT /api/v1/instagram/account
    * Update the connected account — mainly to rotate an expiring token, or to
    * set ig_scoped_id once it's been observed on a real inbound webhook event.
-   * Body: { business_id, page_id?, access_token?, is_active?, ig_scoped_id? }
+   * Body: { business_id, account_id?, page_id?, access_token?, is_active?, ig_scoped_id? }
    */
   updateAccount: async (req, res) => {
     try {
-      const { business_id, page_id, access_token, is_active, ig_scoped_id } = req.body;
+      const { business_id, account_id = null, page_id, access_token, is_active, ig_scoped_id } = req.body;
       if (!business_id) {
         return res.status(400).json({ success: false, message: 'Validation failed', details: ['business_id is required'] });
       }
 
-      const account = await instagramService.updateAccount(business_id, { page_id, access_token, is_active, ig_scoped_id });
+      const account = await instagramService.updateAccount(
+        business_id, { page_id, access_token, is_active, ig_scoped_id }, account_id
+      );
       return res.status(200).json({ success: true, message: 'Instagram account updated successfully', account });
     } catch (err) {
       return fail(res, err, 'updateAccount');
@@ -116,17 +137,17 @@ module.exports = {
   },
 
   /**
-   * DELETE /api/v1/instagram/account?business_id=
+   * DELETE /api/v1/instagram/account?business_id=&account_id=
    * Disconnect the account (soft delete — message history is preserved).
    */
   deleteAccount: async (req, res) => {
     try {
-      const { business_id } = req.query;
+      const { business_id, account_id = null } = req.query;
       if (!business_id) {
         return res.status(400).json({ success: false, message: 'Validation failed', details: ['business_id is required'] });
       }
 
-      const result = await instagramService.deleteAccount(business_id);
+      const result = await instagramService.deleteAccount(business_id, account_id);
       return res.status(200).json({ success: true, message: 'Instagram account disconnected successfully', result });
     } catch (err) {
       return fail(res, err, 'deleteAccount');
@@ -138,17 +159,17 @@ module.exports = {
   // ══════════════════════════════════════════════════════════════════════════
 
   /**
-   * GET /api/v1/instagram/profile?business_id=
+   * GET /api/v1/instagram/profile?business_id=&account_id=
    * Fetch the connected account's own Instagram profile from Meta.
    */
   getProfile: async (req, res) => {
     try {
-      const { business_id } = req.query;
+      const { business_id, account_id = null } = req.query;
       if (!business_id) {
         return res.status(400).json({ success: false, message: 'Validation failed', details: ['business_id is required'] });
       }
 
-      const data = await instagramService.getProfile(business_id);
+      const data = await instagramService.getProfile(business_id, account_id);
       return res.status(200).json({ success: true, message: 'Profile fetched successfully', data });
     } catch (err) {
       return fail(res, err, 'getProfile');
@@ -156,19 +177,19 @@ module.exports = {
   },
 
   /**
-   * GET /api/v1/instagram/contact-profile?business_id=&igsid=
+   * GET /api/v1/instagram/contact-profile?business_id=&account_id=&igsid=
    * Fetch a contact's public profile (name, avatar) by their scoped ID.
    */
   getContactProfile: async (req, res) => {
     try {
-      const { business_id, igsid } = req.query;
+      const { business_id, account_id = null, igsid } = req.query;
 
       const missing = missingFields({ business_id, igsid });
       if (missing.length) {
         return res.status(400).json({ success: false, message: 'Validation failed', details: missing });
       }
 
-      const data = await instagramService.getContactProfile(business_id, igsid);
+      const data = await instagramService.getContactProfile(business_id, igsid, account_id);
       return res.status(200).json({ success: true, message: 'Contact profile fetched successfully', data });
     } catch (err) {
       return fail(res, err, 'getContactProfile');
@@ -181,11 +202,11 @@ module.exports = {
 
   /**
    * POST /api/v1/instagram/send/text
-   * Body: { business_id, to, text, receiver_id? }
+   * Body: { business_id, account_id?, to, text, receiver_id? }
    */
   sendText: async (req, res) => {
     try {
-      const { business_id, to, text, receiver_id = null } = req.body;
+      const { business_id, account_id = null, to, text, receiver_id = null } = req.body;
 
       const missing = missingFields({ business_id, to, text });
       if (missing.length) {
@@ -193,7 +214,7 @@ module.exports = {
       }
 
       const { record, metaResponse } = await instagramService.sendTextMessage(
-        business_id, to, text, req.user?.id || null, receiver_id
+        business_id, to, text, req.user?.id || null, receiver_id, account_id
       );
 
       return res.status(200).json({
@@ -211,11 +232,11 @@ module.exports = {
 
   /**
    * POST /api/v1/instagram/send/media
-   * Body: { business_id, to, media_type, media_url, receiver_id? }
+   * Body: { business_id, account_id?, to, media_type, media_url, receiver_id? }
    */
   sendMedia: async (req, res) => {
     try {
-      const { business_id, to, media_type, media_url, receiver_id = null } = req.body;
+      const { business_id, account_id = null, to, media_type, media_url, receiver_id = null } = req.body;
 
       const missing = missingFields({ business_id, to, media_type, media_url });
       if (missing.length) {
@@ -223,7 +244,7 @@ module.exports = {
       }
 
       const { record, metaResponse } = await instagramService.sendMediaMessage(
-        business_id, to, media_type, media_url, req.user?.id || null, receiver_id
+        business_id, to, media_type, media_url, req.user?.id || null, receiver_id, account_id
       );
 
       return res.status(200).json({
@@ -241,18 +262,18 @@ module.exports = {
 
   /**
    * POST /api/v1/instagram/send/reaction
-   * Body: { business_id, to, message_id, reaction?, unreact? }
+   * Body: { business_id, account_id?, to, message_id, reaction?, unreact? }
    */
   sendReaction: async (req, res) => {
     try {
-      const { business_id, to, message_id, reaction = 'love', unreact = false } = req.body;
+      const { business_id, account_id = null, to, message_id, reaction = 'love', unreact = false } = req.body;
 
       const missing = missingFields({ business_id, to, message_id });
       if (missing.length) {
         return res.status(400).json({ success: false, message: 'Validation failed', details: missing });
       }
 
-      const data = await instagramService.sendReaction(business_id, to, message_id, reaction, unreact);
+      const data = await instagramService.sendReaction(business_id, to, message_id, reaction, unreact, account_id);
       return res.status(200).json({
         success: true,
         message: unreact ? 'Reaction removed successfully' : 'Reaction sent successfully',
@@ -265,18 +286,18 @@ module.exports = {
 
   /**
    * POST /api/v1/instagram/mark-seen
-   * Body: { business_id, to }
+   * Body: { business_id, account_id?, to }
    */
   markSeen: async (req, res) => {
     try {
-      const { business_id, to } = req.body;
+      const { business_id, account_id = null, to } = req.body;
 
       const missing = missingFields({ business_id, to });
       if (missing.length) {
         return res.status(400).json({ success: false, message: 'Validation failed', details: missing });
       }
 
-      const data = await instagramService.markSeen(business_id, to);
+      const data = await instagramService.markSeen(business_id, to, account_id);
       return res.status(200).json({ success: true, message: 'Conversation marked as seen', data });
     } catch (err) {
       return fail(res, err, 'markSeen');
@@ -288,17 +309,17 @@ module.exports = {
   // ══════════════════════════════════════════════════════════════════════════
 
   /**
-   * GET /api/v1/instagram/conversations?business_id=&limit=&offset=
-   * List Instagram threads with a last-message preview.
+   * GET /api/v1/instagram/conversations?business_id=&account_id=&limit=&offset=
+   * List Instagram threads with a last-message preview. account_id narrows to one account.
    */
   getConversations: async (req, res) => {
     try {
-      const { business_id, limit = 50, offset = 0 } = req.query;
+      const { business_id, account_id = null, limit = 50, offset = 0 } = req.query;
       if (!business_id) {
         return res.status(400).json({ success: false, message: 'Validation failed', details: ['business_id is required'] });
       }
 
-      const data = await instagramService.getConversations(business_id, { limit, offset });
+      const data = await instagramService.getConversations(business_id, { limit, offset, accountId: account_id });
       return res.status(200).json({ success: true, ...data });
     } catch (err) {
       return fail(res, err, 'getConversations');

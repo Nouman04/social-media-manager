@@ -78,17 +78,36 @@ module.exports = {
   },
 
   /**
-   * GET /api/v1/messenger/account?business_id=
-   * Return the connected Page (access token withheld).
+   * GET /api/v1/messenger/accounts?business_id=
+   * Every connected Facebook Page (tokens withheld). Their `id` is the
+   * account_id the other endpoints accept.
    */
-  getAccount: async (req, res) => {
+  listAccounts: async (req, res) => {
     try {
       const { business_id } = req.query;
       if (!business_id) {
         return res.status(400).json({ success: false, message: 'Validation failed', details: ['business_id is required'] });
       }
 
-      const account = await messengerService.getAccount(business_id);
+      const accounts = await messengerService.listAccounts(business_id);
+      return res.status(200).json({ success: true, count: accounts.length, accounts });
+    } catch (err) {
+      return fail(res, err, 'listAccounts');
+    }
+  },
+
+  /**
+   * GET /api/v1/messenger/account?business_id=&account_id=
+   * Return one connected Page (access token withheld).
+   */
+  getAccount: async (req, res) => {
+    try {
+      const { business_id, account_id = null } = req.query;
+      if (!business_id) {
+        return res.status(400).json({ success: false, message: 'Validation failed', details: ['business_id is required'] });
+      }
+
+      const account = await messengerService.getAccount(business_id, account_id);
       return res.status(200).json({ success: true, account });
     } catch (err) {
       return fail(res, err, 'getAccount');
@@ -98,16 +117,16 @@ module.exports = {
   /**
    * PUT /api/v1/messenger/account
    * Update the connected Page — mainly to rotate an expiring token.
-   * Body: { business_id, access_token?, is_active? }
+   * Body: { business_id, account_id?, access_token?, is_active? }
    */
   updateAccount: async (req, res) => {
     try {
-      const { business_id, access_token, is_active } = req.body;
+      const { business_id, account_id = null, access_token, is_active } = req.body;
       if (!business_id) {
         return res.status(400).json({ success: false, message: 'Validation failed', details: ['business_id is required'] });
       }
 
-      const account = await messengerService.updateAccount(business_id, { access_token, is_active });
+      const account = await messengerService.updateAccount(business_id, { access_token, is_active }, account_id);
       return res.status(200).json({ success: true, message: 'Facebook Page updated successfully', account });
     } catch (err) {
       return fail(res, err, 'updateAccount');
@@ -115,17 +134,17 @@ module.exports = {
   },
 
   /**
-   * DELETE /api/v1/messenger/account?business_id=
+   * DELETE /api/v1/messenger/account?business_id=&account_id=
    * Disconnect the Page (soft delete — message history is preserved).
    */
   deleteAccount: async (req, res) => {
     try {
-      const { business_id } = req.query;
+      const { business_id, account_id = null } = req.query;
       if (!business_id) {
         return res.status(400).json({ success: false, message: 'Validation failed', details: ['business_id is required'] });
       }
 
-      const result = await messengerService.deleteAccount(business_id);
+      const result = await messengerService.deleteAccount(business_id, account_id);
       return res.status(200).json({ success: true, message: 'Facebook Page disconnected successfully', result });
     } catch (err) {
       return fail(res, err, 'deleteAccount');
@@ -137,17 +156,17 @@ module.exports = {
   // ══════════════════════════════════════════════════════════════════════════
 
   /**
-   * GET /api/v1/messenger/profile?business_id=
+   * GET /api/v1/messenger/profile?business_id=&account_id=
    * Fetch the connected Page's own profile from Meta.
    */
   getProfile: async (req, res) => {
     try {
-      const { business_id } = req.query;
+      const { business_id, account_id = null } = req.query;
       if (!business_id) {
         return res.status(400).json({ success: false, message: 'Validation failed', details: ['business_id is required'] });
       }
 
-      const data = await messengerService.getProfile(business_id);
+      const data = await messengerService.getProfile(business_id, account_id);
       return res.status(200).json({ success: true, message: 'Page profile fetched successfully', data });
     } catch (err) {
       return fail(res, err, 'getProfile');
@@ -155,19 +174,19 @@ module.exports = {
   },
 
   /**
-   * GET /api/v1/messenger/contact-profile?business_id=&psid=
+   * GET /api/v1/messenger/contact-profile?business_id=&account_id=&psid=
    * Fetch a contact's profile (name, avatar) by their Page-Scoped ID.
    */
   getContactProfile: async (req, res) => {
     try {
-      const { business_id, psid } = req.query;
+      const { business_id, account_id = null, psid } = req.query;
 
       const missing = missingFields({ business_id, psid });
       if (missing.length) {
         return res.status(400).json({ success: false, message: 'Validation failed', details: missing });
       }
 
-      const data = await messengerService.getContactProfile(business_id, psid);
+      const data = await messengerService.getContactProfile(business_id, psid, account_id);
       return res.status(200).json({ success: true, message: 'Contact profile fetched successfully', data });
     } catch (err) {
       return fail(res, err, 'getContactProfile');
@@ -186,7 +205,7 @@ module.exports = {
     try {
       const {
         business_id, to, text,
-        messaging_type = 'RESPONSE', message_tag = null, receiver_id = null,
+        messaging_type = 'RESPONSE', message_tag = null, receiver_id = null, account_id = null,
       } = req.body;
 
       const missing = missingFields({ business_id, to, text });
@@ -199,6 +218,7 @@ module.exports = {
         messageTag: message_tag,
         senderId: req.user?.id || null,
         receiverId: receiver_id,
+        accountId: account_id,
       });
 
       return res.status(200).json({
@@ -222,7 +242,7 @@ module.exports = {
     try {
       const {
         business_id, to, media_type, media_url,
-        messaging_type = 'RESPONSE', message_tag = null, receiver_id = null,
+        messaging_type = 'RESPONSE', message_tag = null, receiver_id = null, account_id = null,
       } = req.body;
 
       const missing = missingFields({ business_id, to, media_type, media_url });
@@ -235,6 +255,7 @@ module.exports = {
         messageTag: message_tag,
         senderId: req.user?.id || null,
         receiverId: receiver_id,
+        accountId: account_id,
       });
 
       return res.status(200).json({
@@ -258,7 +279,7 @@ module.exports = {
     try {
       const {
         business_id, to, text, quick_replies,
-        messaging_type = 'RESPONSE', message_tag = null, receiver_id = null,
+        messaging_type = 'RESPONSE', message_tag = null, receiver_id = null, account_id = null,
       } = req.body;
 
       const missing = missingFields({ business_id, to, text, quick_replies });
@@ -271,6 +292,7 @@ module.exports = {
         messageTag: message_tag,
         senderId: req.user?.id || null,
         receiverId: receiver_id,
+        accountId: account_id,
       });
 
       return res.status(200).json({
@@ -288,18 +310,18 @@ module.exports = {
 
   /**
    * POST /api/v1/messenger/sender-action
-   * Body: { business_id, to, sender_action } — mark_seen | typing_on | typing_off
+   * Body: { business_id, account_id?, to, sender_action } — mark_seen | typing_on | typing_off
    */
   sendSenderAction: async (req, res) => {
     try {
-      const { business_id, to, sender_action } = req.body;
+      const { business_id, account_id = null, to, sender_action } = req.body;
 
       const missing = missingFields({ business_id, to, sender_action });
       if (missing.length) {
         return res.status(400).json({ success: false, message: 'Validation failed', details: missing });
       }
 
-      const data = await messengerService.sendSenderAction(business_id, to, sender_action);
+      const data = await messengerService.sendSenderAction(business_id, to, sender_action, account_id);
       return res.status(200).json({ success: true, message: `Sender action "${sender_action}" sent`, data });
     } catch (err) {
       return fail(res, err, 'sendSenderAction');
@@ -311,17 +333,17 @@ module.exports = {
   // ══════════════════════════════════════════════════════════════════════════
 
   /**
-   * GET /api/v1/messenger/conversations?business_id=&limit=&offset=
-   * List Messenger threads with a last-message preview.
+   * GET /api/v1/messenger/conversations?business_id=&account_id=&limit=&offset=
+   * List Messenger threads with a last-message preview. account_id narrows to one Page.
    */
   getConversations: async (req, res) => {
     try {
-      const { business_id, limit = 50, offset = 0 } = req.query;
+      const { business_id, account_id = null, limit = 50, offset = 0 } = req.query;
       if (!business_id) {
         return res.status(400).json({ success: false, message: 'Validation failed', details: ['business_id is required'] });
       }
 
-      const data = await messengerService.getConversations(business_id, { limit, offset });
+      const data = await messengerService.getConversations(business_id, { limit, offset, accountId: account_id });
       return res.status(200).json({ success: true, ...data });
     } catch (err) {
       return fail(res, err, 'getConversations');

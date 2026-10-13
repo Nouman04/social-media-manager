@@ -30,6 +30,11 @@ module.exports = (sequelize, DataTypes) => {
       onDelete: 'RESTRICT',
       comment: 'Which social platform this conversation came from',
     },
+    account_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      comment: 'Connected account this thread runs through — whatsapp_details / instagram_details / messenger_details id, by platform',
+    },
     contact_identifier: {
       type: DataTypes.STRING(128),
       allowNull: true,

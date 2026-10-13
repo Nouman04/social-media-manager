@@ -246,6 +246,25 @@ module.exports = {
     }
   },
 
+  /**
+   * GET /api/v1/whatsapp/accounts?business_id=
+   * Every WhatsApp number the business has connected (tokens withheld).
+   * Their `id` is the account_id the other endpoints accept.
+   */
+  listAccounts: async (req, res) => {
+    try {
+      const { business_id } = req.query;
+      if (!business_id) {
+        return res.status(400).json({ success: false, message: 'Validation failed', details: ['business_id is required'] });
+      }
+      const accounts = await whatsappService.listAccounts(business_id);
+      return res.status(200).json({ success: true, count: accounts.length, accounts });
+    } catch (err) {
+      console.error('[whatsappController.listAccounts] Error:', err.message);
+      return res.status(err.statusCode || 500).json({ success: false, message: err.message });
+    }
+  },
+
   // ══════════════════════════════════════════════════════════════════════════
   //  4. WEBHOOK — GET (Meta verification handshake)
   // ══════════════════════════════════════════════════════════════════════════
@@ -329,7 +348,7 @@ module.exports = {
    */
   sendTemplate: async (req, res) => {
     try {
-      const { business_id, to, template_name, language_code = 'en_US', components = [], receiver_id = null } = req.body;
+      const { business_id, account_id = null, to, template_name, language_code = 'en_US', components = [], receiver_id = null } = req.body;
 
       const missing = [];
       if (!business_id)   missing.push('business_id is required');
@@ -341,7 +360,7 @@ module.exports = {
       }
 
       const { record, metaResponse } = await whatsappService.sendTemplateMessage(
-        business_id, to, template_name, language_code, components, req.user?.id || null, receiver_id
+        business_id, to, template_name, language_code, components, req.user?.id || null, receiver_id, account_id
       );
 
       return res.status(200).json({
@@ -379,7 +398,7 @@ module.exports = {
    */
   sendText: async (req, res) => {
     try {
-      const { business_id, to, body: messageBody, preview_url = false, receiver_id = null } = req.body;
+      const { business_id, account_id = null, to, body: messageBody, preview_url = false, receiver_id = null } = req.body;
 
       const missing = [];
       if (!business_id)  missing.push('business_id is required');
@@ -391,7 +410,7 @@ module.exports = {
       }
 
       const { record, metaResponse } = await whatsappService.sendTextMessage(
-        business_id, to, messageBody, preview_url, req.user?.id || null, receiver_id
+        business_id, to, messageBody, preview_url, req.user?.id || null, receiver_id, account_id
       );
 
       return res.status(200).json({
@@ -432,7 +451,7 @@ module.exports = {
    */
   sendMedia: async (req, res) => {
     try {
-      const { business_id, to, media_type, media_url, media_id, caption = '', filename = '', receiver_id = null } = req.body;
+      const { business_id, account_id = null, to, media_type, media_url, media_id, caption = '', filename = '', receiver_id = null } = req.body;
 
       const missing = [];
       if (!business_id) missing.push('business_id is required');
@@ -450,7 +469,7 @@ module.exports = {
       let localUrl = null;
       if (req.file && !resolvedMediaId) {
         const uploaded = await whatsappService.uploadMedia(
-          business_id, req.file.buffer, req.file.originalname, req.file.mimetype
+          business_id, req.file.buffer, req.file.originalname, req.file.mimetype, account_id
         );
         resolvedMediaId = uploaded.id;
 
@@ -475,7 +494,7 @@ module.exports = {
       }
 
       const { record, metaResponse } = await whatsappService.sendMediaMessage(
-        business_id, to, media_type, media_url, caption, filename || (req.file && req.file.originalname), req.user?.id || null, receiver_id, resolvedMediaId, localUrl
+        business_id, to, media_type, media_url, caption, filename || (req.file && req.file.originalname), req.user?.id || null, receiver_id, resolvedMediaId, localUrl, account_id
       );
 
       return res.status(200).json({
@@ -503,16 +522,16 @@ module.exports = {
   // ══════════════════════════════════════════════════════════════════════════
 
   /**
-   * GET /api/v1/whatsapp/conversations?business_id=&limit=&offset=
-   * Thread list with a last-message preview.
+   * GET /api/v1/whatsapp/conversations?business_id=&account_id=&limit=&offset=
+   * Thread list with a last-message preview. account_id narrows to one number.
    */
   getConversations: async (req, res) => {
     try {
-      const { business_id, limit = 50, offset = 0 } = req.query;
+      const { business_id, account_id = null, limit = 50, offset = 0 } = req.query;
       if (!business_id) {
         return res.status(400).json({ success: false, message: 'Validation failed', details: ['business_id is required'] });
       }
-      const data = await whatsappService.getConversations(business_id, { limit, offset });
+      const data = await whatsappService.getConversations(business_id, { limit, offset, accountId: account_id });
       return res.status(200).json({ success: true, ...data });
     } catch (err) {
       console.error('[whatsappController.getConversations] Error:', err.message);
@@ -521,19 +540,20 @@ module.exports = {
   },
 
   /**
-   * GET /api/v1/whatsapp/messages?business_id=&conversation_id=|contact=&limit=&offset=
+   * GET /api/v1/whatsapp/messages?business_id=&conversation_id=|contact=&account_id=&limit=&offset=
    * One thread's history. `contact` lets the UI open a chat for a number that
-   * has no conversation yet.
+   * has no conversation yet; with several numbers connected it needs account_id.
    */
   getMessages: async (req, res) => {
     try {
-      const { business_id, conversation_id, contact, limit = 100, offset = 0 } = req.query;
+      const { business_id, conversation_id, contact, account_id = null, limit = 100, offset = 0 } = req.query;
       if (!business_id) {
         return res.status(400).json({ success: false, message: 'Validation failed', details: ['business_id is required'] });
       }
       const data = await whatsappService.getMessages(business_id, {
         conversationId: conversation_id || null,
         contact: contact || null,
+        accountId: account_id,
         limit,
         offset,
       });
@@ -549,12 +569,12 @@ module.exports = {
   // ══════════════════════════════════════════════════════════════════════════
 
   /**
-   * GET /api/v1/whatsapp/templates?business_id=&force_sync=
-   * Fetch template list (from Meta API & DB cache).
+   * GET /api/v1/whatsapp/templates?business_id=&account_id=&force_sync=
+   * Fetch template list (from Meta API & DB cache) for that number's WABA.
    */
   getTemplates: async (req, res) => {
     try {
-      const { business_id, force_sync } = req.query;
+      const { business_id, account_id = null, force_sync } = req.query;
 
       if (!business_id) {
         return res.status(400).json({
@@ -565,7 +585,7 @@ module.exports = {
       }
 
       const forceSync = force_sync === undefined || force_sync === 'true' || force_sync === true;
-      const templates = await whatsappService.getTemplates(business_id, forceSync);
+      const templates = await whatsappService.getTemplates(business_id, forceSync, account_id);
 
       return res.status(200).json({
         success: true,
@@ -585,11 +605,11 @@ module.exports = {
   /**
    * POST /api/v1/whatsapp/templates
    * Create a new message template at Meta and store locally.
-   * Body: { business_id, name, category, language, components }
+   * Body: { business_id, account_id?, name, category, language, components }
    */
   createTemplate: async (req, res) => {
     try {
-      const { business_id, name, category, language = 'en_US', components } = req.body;
+      const { business_id, account_id = null, name, category, language = 'en_US', components } = req.body;
 
       const missing = [];
       if (!business_id) missing.push('business_id is required');
@@ -606,7 +626,7 @@ module.exports = {
         category,
         language,
         components,
-      });
+      }, account_id);
 
       return res.status(201).json({
         success: true,
@@ -625,12 +645,12 @@ module.exports = {
   },
 
   /**
-   * DELETE /api/v1/whatsapp/templates?business_id=&name=
+   * DELETE /api/v1/whatsapp/templates?business_id=&account_id=&name=
    * Delete a template from Meta and local DB.
    */
   deleteTemplate: async (req, res) => {
     try {
-      const { business_id, name } = req.query;
+      const { business_id, account_id = null, name } = req.query;
 
       const missing = [];
       if (!business_id) missing.push('business_id is required');
@@ -640,7 +660,7 @@ module.exports = {
         return res.status(400).json({ success: false, message: 'Validation failed', details: missing });
       }
 
-      const response = await whatsappService.deleteTemplate(business_id, name);
+      const response = await whatsappService.deleteTemplate(business_id, name, account_id);
 
       return res.status(200).json({
         success: true,
@@ -662,12 +682,12 @@ module.exports = {
   // ══════════════════════════════════════════════════════════════════════════
 
   /**
-   * GET /api/v1/whatsapp/health?business_id=
+   * GET /api/v1/whatsapp/health?business_id=&account_id=
    * Fetch current quality score, limit tier, and account mode from Meta & save locally.
    */
   getAccountHealth: async (req, res) => {
     try {
-      const { business_id } = req.query;
+      const { business_id, account_id = null } = req.query;
 
       if (!business_id) {
         return res.status(400).json({
@@ -677,7 +697,7 @@ module.exports = {
         });
       }
 
-      const health = await whatsappService.getAccountHealth(business_id);
+      const health = await whatsappService.getAccountHealth(business_id, account_id);
 
       return res.status(200).json({
         success: true,
@@ -703,11 +723,12 @@ module.exports = {
    * Upload a file to Meta servers to obtain a media_id.
    * Expects multipart/form-data with fields:
    *   - business_id (text)
+   *   - account_id (text, optional — the number the media will be sent from)
    *   - file (binary)
    */
   uploadMedia: async (req, res) => {
     try {
-      const { business_id } = req.body;
+      const { business_id, account_id = null } = req.body;
       if (!business_id) {
         return res.status(400).json({ success: false, message: 'business_id is required' });
       }
@@ -719,7 +740,8 @@ module.exports = {
         business_id,
         req.file.buffer,
         req.file.originalname,
-        req.file.mimetype
+        req.file.mimetype,
+        account_id
       );
 
       return res.status(200).json({
@@ -739,12 +761,12 @@ module.exports = {
   },
 
   /**
-   * GET /api/v1/whatsapp/media?business_id=&media_id=
+   * GET /api/v1/whatsapp/media?business_id=&account_id=&media_id=
    * Retrieve download URL, download the binary payload, and cache it locally.
    */
   downloadMedia: async (req, res) => {
     try {
-      const { business_id, media_id } = req.query;
+      const { business_id, account_id = null, media_id } = req.query;
 
       const missing = [];
       if (!business_id) missing.push('business_id is required');
@@ -754,7 +776,7 @@ module.exports = {
         return res.status(400).json({ success: false, message: 'Validation failed', details: missing });
       }
 
-      const result = await whatsappService.downloadMedia(business_id, media_id);
+      const result = await whatsappService.downloadMedia(business_id, media_id, account_id);
 
       return res.status(200).json({
         success: true,

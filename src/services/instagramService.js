@@ -4,6 +4,7 @@ const axios = require('axios');
 const { Op } = require('sequelize');
 const { InstagramDetail, InstagramMessage, Conversation, Business } = require('../../models');
 const { findOrCreateConversation, getPlatformId } = require('../helpers/conversationHelper');
+const { resolveAccount, listAccounts } = require('../helpers/accountHelper');
 const realtime = require('../helpers/realtime');
 
 // Instagram messaging has two pipelines and each rejects the other's token:
@@ -63,21 +64,14 @@ const wrapMetaError = (apiErr, context) => {
 };
 
 /**
- * Fetch active InstagramDetail for a tenant (business_id). Throws if none.
+ * Fetch the active InstagramDetail (one connected account) a request acts
+ * through. See resolveAccount for how account_id is chosen.
  * @param {number} businessId
+ * @param {number} [accountId] - instagram_details.id
  * @returns {Promise<InstagramDetail>}
  */
-const getTenantCredentials = async (businessId) => {
-  const detail = await InstagramDetail.findOne({
-    where: { business_id: businessId, is_active: true },
-  });
-  if (!detail) {
-    const err = new Error(`No active Instagram credentials found for business_id=${businessId}`);
-    err.statusCode = 404;
-    throw err;
-  }
-  return detail;
-};
+const getTenantCredentials = (businessId, accountId = null) =>
+  resolveAccount(InstagramDetail, businessId, accountId, 'Instagram');
 
 /**
  * Persist an outbound message as 'queued' against its conversation.
@@ -112,6 +106,7 @@ const emitOutbound = async (record) => {
       message: record.toJSON(),
       conversation: {
         id: conversation.id,
+        account_id: conversation.account_id,
         contact_identifier: conversation.contact_identifier,
         contact_name: conversation.contact_name,
       },
@@ -190,7 +185,12 @@ const ensureSendId = async (detail, conversation, toIgsid) => {
 const resolveSendId = async (detail, toIgsid) => {
   const socialPlatformId = await getPlatformId(PLATFORM);
   const conversation = await Conversation.findOne({
-    where: { business_id: detail.business_id, social_platform_id: socialPlatformId, contact_identifier: toIgsid },
+    where: {
+      business_id: detail.business_id,
+      social_platform_id: socialPlatformId,
+      account_id: detail.id,
+      contact_identifier: toIgsid,
+    },
   });
   if (!conversation) return toIgsid;
   return ensureSendId(detail, conversation, toIgsid);
@@ -207,20 +207,22 @@ const resolveSendId = async (detail, toIgsid) => {
  * @param {object} args.messageBody  - The `message` object sent to Meta.
  * @param {number} [args.senderId]
  * @param {number} [args.receiverId]
+ * @param {number} [args.accountId]  - instagram_details.id to send from.
  * @returns {Promise<{record: InstagramMessage, metaResponse: object}>}
  */
-const dispatchMessage = async ({ businessId, toIgsid, messageType, messageBody, senderId = null, receiverId = null }) => {
+const dispatchMessage = async ({ businessId, toIgsid, messageType, messageBody, senderId = null, receiverId = null, accountId = null }) => {
   if (!IGSID_RE.test(toIgsid)) {
     const err = new Error(`Invalid Instagram-scoped ID: "${toIgsid}". Must be a numeric IGSID.`);
     err.statusCode = 400;
     throw err;
   }
 
-  const detail = await getTenantCredentials(businessId);
+  const detail = await getTenantCredentials(businessId, accountId);
 
   const conversation = await findOrCreateConversation({
     businessId,
     platformName: PLATFORM,
+    accountId: detail.id,
     contactIdentifier: toIgsid,
     createdBy: senderId,
   });
@@ -331,11 +333,16 @@ const instagramService = {
   },
 
   /**
-   * Return the connected Instagram account for a tenant.
+   * Every Instagram account the business has connected (tokens withheld).
+   */
+  listAccounts: (businessId) => listAccounts(InstagramDetail, businessId),
+
+  /**
+   * Return one connected Instagram account for a tenant.
    * The access token is withheld from the response.
    */
-  getAccount: async (businessId) => {
-    const detail = await getTenantCredentials(businessId);
+  getAccount: async (businessId, accountId = null) => {
+    const detail = await getTenantCredentials(businessId, accountId);
     const plain = detail.toJSON();
     delete plain.access_token;
     return plain;
@@ -350,8 +357,8 @@ const instagramService = {
    * so a freshly connected account won't have one until then. Once you see
    * it in a "No active tenant for id: ..." log line, set it here.
    */
-  updateAccount: async (businessId, { page_id, access_token, is_active, ig_scoped_id }) => {
-    const detail = await getTenantCredentials(businessId);
+  updateAccount: async (businessId, { page_id, access_token, is_active, ig_scoped_id }, accountId = null) => {
+    const detail = await getTenantCredentials(businessId, accountId);
 
     const updates = {};
     if (page_id !== undefined) updates.page_id = page_id;
@@ -382,10 +389,10 @@ const instagramService = {
   /**
    * Disconnect an Instagram account (soft delete — message history is kept).
    */
-  deleteAccount: async (businessId) => {
-    const detail = await getTenantCredentials(businessId);
+  deleteAccount: async (businessId, accountId = null) => {
+    const detail = await getTenantCredentials(businessId, accountId);
     await detail.destroy();
-    return { business_id: businessId, ig_user_id: detail.ig_user_id, disconnected: true };
+    return { business_id: businessId, account_id: detail.id, ig_user_id: detail.ig_user_id, disconnected: true };
   },
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -395,8 +402,8 @@ const instagramService = {
   /**
    * Fetch the connected Instagram professional profile from Meta.
    */
-  getProfile: async (businessId) => {
-    const detail = await getTenantCredentials(businessId);
+  getProfile: async (businessId, accountId = null) => {
+    const detail = await getTenantCredentials(businessId, accountId);
     const url = `${graphBase(detail.access_token)}/${detail.ig_user_id}`;
     const params = {
       fields: 'id,username,name,biography,website,profile_picture_url,followers_count,follows_count,media_count',
@@ -413,8 +420,8 @@ const instagramService = {
    * Fetch a contact's public profile by their Instagram-scoped ID.
    * Useful for showing a name/avatar next to an inbound conversation.
    */
-  getContactProfile: async (businessId, igsid) => {
-    const detail = await getTenantCredentials(businessId);
+  getContactProfile: async (businessId, igsid, accountId = null) => {
+    const detail = await getTenantCredentials(businessId, accountId);
     const url = `${graphBase(detail.access_token)}/${igsid}`;
     const params = { fields: 'name,username,profile_pic,is_verified_user,follower_count' };
     try {
@@ -440,8 +447,9 @@ const instagramService = {
    * @param {string} text
    * @param {number} [senderId]
    * @param {number} [receiverId]
+   * @param {number} [accountId] - instagram_details.id to send from
    */
-  sendTextMessage: async (businessId, toIgsid, text, senderId = null, receiverId = null) => {
+  sendTextMessage: async (businessId, toIgsid, text, senderId = null, receiverId = null, accountId = null) => {
     if (!text || !String(text).trim()) {
       const err = new Error('Message text is required.');
       err.statusCode = 400;
@@ -455,6 +463,7 @@ const instagramService = {
       messageBody: { text },
       senderId,
       receiverId,
+      accountId,
     });
   },
 
@@ -469,8 +478,9 @@ const instagramService = {
    * @param {string} toIgsid
    * @param {'image'|'video'|'audio'|'file'} mediaType
    * @param {string} mediaUrl - Publicly reachable URL of the asset.
+   * @param {number} [accountId] - instagram_details.id to send from
    */
-  sendMediaMessage: async (businessId, toIgsid, mediaType, mediaUrl, senderId = null, receiverId = null) => {
+  sendMediaMessage: async (businessId, toIgsid, mediaType, mediaUrl, senderId = null, receiverId = null, accountId = null) => {
     const VALID_TYPES = ['image', 'video', 'audio', 'file'];
     if (!VALID_TYPES.includes(mediaType)) {
       const err = new Error(`Invalid media type "${mediaType}". Must be one of: ${VALID_TYPES.join(', ')}.`);
@@ -495,6 +505,7 @@ const instagramService = {
       },
       senderId,
       receiverId,
+      accountId,
     });
   },
 
@@ -506,8 +517,8 @@ const instagramService = {
    * React to (or un-react to) a message the contact sent.
    * POST /{IG_USER_ID}/messages with sender_action.
    */
-  sendReaction: async (businessId, toIgsid, messageId, reaction = 'love', unreact = false) => {
-    const detail = await getTenantCredentials(businessId);
+  sendReaction: async (businessId, toIgsid, messageId, reaction = 'love', unreact = false, accountId = null) => {
+    const detail = await getTenantCredentials(businessId, accountId);
     const sendToId = await resolveSendId(detail, toIgsid);
 
     const payload = {
@@ -528,8 +539,8 @@ const instagramService = {
   /**
    * Mark the conversation as seen (blue tick) for a contact.
    */
-  markSeen: async (businessId, toIgsid) => {
-    const detail = await getTenantCredentials(businessId);
+  markSeen: async (businessId, toIgsid, accountId = null) => {
+    const detail = await getTenantCredentials(businessId, accountId);
     const sendToId = await resolveSendId(detail, toIgsid);
     const payload = { recipient: { id: sendToId }, sender_action: 'mark_seen' };
     const url = `${graphBase(detail.access_token)}/${messagingNodeId(detail)}/messages`;
@@ -547,12 +558,16 @@ const instagramService = {
 
   /**
    * List Instagram conversation threads for a tenant, newest activity first.
+   * accountId narrows the list to one connected account; omit it for all.
    */
-  getConversations: async (businessId, { limit = 50, offset = 0 } = {}) => {
+  getConversations: async (businessId, { limit = 50, offset = 0, accountId = null } = {}) => {
     const socialPlatformId = await getPlatformId(PLATFORM);
 
+    const where = { business_id: businessId, social_platform_id: socialPlatformId };
+    if (accountId) where.account_id = accountId;
+
     const { rows, count } = await Conversation.findAndCountAll({
-      where: { business_id: businessId, social_platform_id: socialPlatformId },
+      where,
       order: [['updated_at', 'DESC']],
       limit: Number(limit),
       offset: Number(offset),
@@ -824,6 +839,7 @@ const instagramService = {
     const conversation = await findOrCreateConversation({
       businessId: tenantId,
       platformName: PLATFORM,
+      accountId: detail.id,
       contactIdentifier: String(contactIgsid),
       createdBy: detail.business?.created_by || null,
     });
@@ -853,6 +869,7 @@ const instagramService = {
         message: saved.toJSON(),
         conversation: {
           id: conversation.id,
+          account_id: conversation.account_id,
           contact_identifier: conversation.contact_identifier,
           contact_name: conversation.contact_name || null,
         },
@@ -875,6 +892,7 @@ const instagramService = {
       where: {
         business_id: detail.business_id,
         social_platform_id: await getPlatformId(PLATFORM),
+        account_id: detail.id,
         contact_identifier: String(event?.sender?.id || ''),
       },
     });

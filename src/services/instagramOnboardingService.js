@@ -2,6 +2,8 @@
 
 const axios = require('axios');
 const { InstagramDetail, Business } = require('../../models');
+const pendingSignup = require('../helpers/pendingSignup');
+const { getAllPages } = require('../helpers/graphPaging');
 
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || 'v21.0';
 const GRAPH_API_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
@@ -95,15 +97,11 @@ const instagramOnboardingService = {
    * @returns {Promise<Array<{id, name, access_token, instagram_business_account}>>}
    */
   listPagesViaMeAccounts: async (userAccessToken) => {
-    const url = `${GRAPH_API_BASE}/me/accounts`;
     try {
-      const response = await axios.get(url, {
-        params: {
-          fields: 'id,name,access_token,instagram_business_account{id,username,profile_picture_url,followers_count}',
-          access_token: userAccessToken,
-        },
+      return await getAllPages(`${GRAPH_API_BASE}/me/accounts`, {
+        fields: 'id,name,access_token,instagram_business_account{id,username,profile_picture_url,followers_count}',
+        access_token: userAccessToken,
       });
-      return response.data?.data || [];
     } catch (apiErr) {
       throw wrapMetaError(apiErr, 'listPagesViaMeAccounts');
     }
@@ -223,12 +221,15 @@ const instagramOnboardingService = {
    * Run the whole Embedded Signup exchange and persist the result.
    *
    * @param {number} businessId  - Tenant the account is being connected to.
-   * @param {object} payload     - { code, redirect_uri?, page_id? }
-   *                                page_id lets the caller pick a specific Page
-   *                                when the login granted access to several.
-   * @returns {Promise<object>}  - Stored account (without the token).
+   * Without a page_id nothing is saved: the Instagram accounts come back with
+   * needs_selection and a selection_id (even when there is only one), and the
+   * caller re-posts { selection_id, page_id } once per account.
+   *
+   * @param {object} payload     - { code | selection_id, redirect_uri?, page_id? }
+   * @param {number} userId      - Signed-in user; a selection_id only works for them.
+   * @returns {Promise<object>}  - Stored account (without the token), or the account list.
    */
-  completeEmbeddedSignup: async (businessId, { code, page_id = null, redirect_uri = null }) => {
+  completeEmbeddedSignup: async (businessId, { code, selection_id = null, page_id = null, redirect_uri = null }, userId) => {
     const business = await Business.findByPk(businessId);
     if (!business) {
       const err = new Error(`Business not found for business_id=${businessId}`);
@@ -236,12 +237,43 @@ const instagramOnboardingService = {
       throw err;
     }
 
-    // 2. code -> user access token
-    const userAccessToken = await instagramOnboardingService.exchangeCodeForToken(code, redirect_uri);
+    // 2. code -> user access token (or the one kept from an earlier login)
+    let userAccessToken;
+    if (selection_id) {
+      const entry = pendingSignup.load(selection_id, { userId, businessId });
+      if (!entry) throw pendingSignup.expiredError();
+      userAccessToken = entry.userAccessToken;
+    } else {
+      userAccessToken = await instagramOnboardingService.exchangeCodeForToken(code, redirect_uri);
+    }
 
     // 3. find the Page (+ linked Instagram account) this login grants access to
     const pages = await instagramOnboardingService.listPagesWithInstagram(userAccessToken);
     const withInstagram = pages.filter((p) => p.instagram_business_account);
+
+    const selectionId = selection_id
+      || (withInstagram.length ? pendingSignup.save({ userId, businessId, userAccessToken }) : null);
+
+    const connected = new Set((await InstagramDetail.findAll({
+      where: {
+        business_id: businessId,
+        ig_user_id: withInstagram.map((p) => String(p.instagram_business_account.id)),
+      },
+      attributes: ['ig_user_id'],
+    })).map((d) => String(d.ig_user_id)));
+    // Every Page with an Instagram account the login granted access to.
+    const availablePages = () => withInstagram.map((p) => ({
+      page_id: p.id,
+      page_name: p.name,
+      ig_user_id: p.instagram_business_account.id,
+      username: p.instagram_business_account.username,
+      connected: connected.has(String(p.instagram_business_account.id)),
+    }));
+
+    // No choice yet — always let the user pick, even from a single account.
+    if (!page_id && withInstagram.length) {
+      return { needs_selection: true, selection_id: selectionId, available_pages: availablePages() };
+    }
 
     let page = page_id
       ? withInstagram.find((p) => String(p.id) === String(page_id))
@@ -318,20 +350,16 @@ const instagramOnboardingService = {
 
     const plain = detail.toJSON();
     delete plain.access_token;
+    connected.add(String(igAccount.id));
 
     return {
       account: plain,
       username: igAccount.username || null,
       followers_count: igAccount.followers_count ?? null,
       page_name: page.name || null,
-      // Every Page with an Instagram account the login granted access to —
-      // lets the connect page offer a picker when there's more than one.
-      available_pages: withInstagram.map((p) => ({
-        page_id: p.id,
-        page_name: p.name,
-        ig_user_id: p.instagram_business_account.id,
-        username: p.instagram_business_account.username,
-      })),
+      // selection_id connects another account without reopening the popup.
+      selection_id: selectionId,
+      available_pages: availablePages(),
     };
   },
 };

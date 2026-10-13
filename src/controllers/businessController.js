@@ -64,6 +64,13 @@ module.exports = {
         { transaction: t }
       );
 
+      // Membership lives on the pivot — without the owner row the business is
+      // missing from the creator's login payload (and every connect page).
+      await BusinessUser.create(
+        { business_id: business.id, user_id: created_by, is_owner: true, is_active: true },
+        { transaction: t }
+      );
+
       await createAddress(ADDRESSABLE_TYPE, business.id, address, { transaction: t });
 
       await t.commit();

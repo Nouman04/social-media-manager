@@ -4,6 +4,7 @@ const axios = require('axios');
 const { Op } = require('sequelize');
 const { WhatsappDetail, WhatsappMessage, WhatsappTemplate, Business, Conversation } = require('../../models');
 const { findOrCreateConversation, getPlatformId } = require('../helpers/conversationHelper');
+const { resolveAccount, listAccounts } = require('../helpers/accountHelper');
 const realtime = require('../helpers/realtime');
 
 const GRAPH_API_BASE = 'https://graph.facebook.com/v18.0';
@@ -24,22 +25,14 @@ const buildConfig = (accessToken) => ({
 });
 
 /**
- * Fetch active WhatsappDetail for a tenant (business_id).
- * Throws if none exists.
+ * Fetch the active WhatsappDetail (one connected number) a request acts
+ * through. See resolveAccount for how account_id is chosen.
  * @param {number} businessId
+ * @param {number} [accountId] - whatsapp_details.id
  * @returns {Promise<WhatsappDetail>}
  */
-const getTenantCredentials = async (businessId) => {
-  const detail = await WhatsappDetail.findOne({
-    where: { business_id: businessId, is_active: true },
-  });
-  if (!detail) {
-    const err = new Error(`No active WhatsApp credentials found for business_id=${businessId}`);
-    err.statusCode = 404;
-    throw err;
-  }
-  return detail;
-};
+const getTenantCredentials = (businessId, accountId = null) =>
+  resolveAccount(WhatsappDetail, businessId, accountId, 'WhatsApp');
 
 /**
  * Persist an outbound message record and return it.
@@ -49,10 +42,11 @@ const getTenantCredentials = async (businessId) => {
  *
  * Sets status = 'queued'.
  */
-const createMessageRecord = async (businessId, toNumber, messageType, payload, senderId = null, receiverId = null) => {
+const createMessageRecord = async (businessId, accountId, toNumber, messageType, payload, senderId = null, receiverId = null) => {
   const conversation = await findOrCreateConversation({
     businessId,
     platformName: PLATFORM,
+    accountId,
     contactIdentifier: toNumber,
     createdBy: senderId,
   });
@@ -89,6 +83,7 @@ const emitOutbound = async (record) => {
       message: record.toJSON(),
       conversation: {
         id: conversation.id,
+        account_id: conversation.account_id,
         contact_identifier: conversation.contact_identifier,
         contact_name: conversation.contact_name,
       },
@@ -164,8 +159,8 @@ const whatsappService = {
    * @param {number} businessId
    * @returns {Promise<object>}
    */
-  getAccountHealth: async (businessId) => {
-    const detail = await getTenantCredentials(businessId);
+  getAccountHealth: async (businessId, accountId = null) => {
+    const detail = await getTenantCredentials(businessId, accountId);
     const url = `${GRAPH_API_BASE}/${detail.phone_number_id}`;
     const params = {
       fields: 'quality_rating,messaging_limit_tier,account_mode',
@@ -183,6 +178,7 @@ const whatsappService = {
 
       return {
         business_id: businessId,
+        account_id: detail.id,
         phone_number_id: detail.phone_number_id,
         quality_rating: detail.quality_rating,
         messaging_limit_tier: detail.messaging_limit_tier,
@@ -264,6 +260,12 @@ const whatsappService = {
     }
   },
 
+  /**
+   * Every WhatsApp number the business has connected (tokens withheld).
+   * @param {number} businessId
+   */
+  listAccounts: (businessId) => listAccounts(WhatsappDetail, businessId),
+
   // ══════════════════════════════════════════════════════════════════════════
   //  4. SEND TEMPLATE MESSAGE
   // ══════════════════════════════════════════════════════════════════════════
@@ -281,9 +283,10 @@ const whatsappService = {
    * @param {Array}  components         - Template components array (header/body/button params).
    * @param {number} [senderId]         - System user (agent) sending this message.
    * @param {number} [receiverId]       - System user this message is associated with.
+   * @param {number} [accountId]        - whatsapp_details.id to send from.
    * @returns {Promise<object>}         - { record, metaResponse }
    */
-  sendTemplateMessage: async (businessId, toNumber, templateName, languageCode = 'en_US', components = [], senderId = null, receiverId = null) => {
+  sendTemplateMessage: async (businessId, toNumber, templateName, languageCode = 'en_US', components = [], senderId = null, receiverId = null, accountId = null) => {
     if (!PHONE_RE.test(toNumber)) {
       const err = new Error(`Invalid phone number format: "${toNumber}". Must be digits only with country code (e.g. 923001234567).`);
       err.statusCode = 400;
@@ -291,7 +294,7 @@ const whatsappService = {
     }
 
     // 1. Fetch tenant credentials from DB
-    const detail = await getTenantCredentials(businessId);
+    const detail = await getTenantCredentials(businessId, accountId);
 
     // 2. Build payload
     const payload = {
@@ -306,7 +309,7 @@ const whatsappService = {
     };
 
     // 3. Persist record as 'queued'
-    const record = await createMessageRecord(businessId, toNumber, 'template', payload, senderId, receiverId);
+    const record = await createMessageRecord(businessId, detail.id, toNumber, 'template', payload, senderId, receiverId);
 
     // 4. Send to Meta
     const url = `${GRAPH_API_BASE}/${detail.phone_number_id}/messages`;
@@ -345,16 +348,17 @@ const whatsappService = {
    * @param {boolean} previewUrl - Whether WhatsApp should render link previews.
    * @param {number} [senderId]  - System user (agent) sending this message.
    * @param {number} [receiverId] - System user this message is associated with.
+   * @param {number} [accountId]  - whatsapp_details.id to send from.
    * @returns {Promise<object>}  - { record, metaResponse }
    */
-  sendTextMessage: async (businessId, toNumber, body, previewUrl = false, senderId = null, receiverId = null) => {
+  sendTextMessage: async (businessId, toNumber, body, previewUrl = false, senderId = null, receiverId = null, accountId = null) => {
     if (!PHONE_RE.test(toNumber)) {
       const err = new Error(`Invalid phone number format: "${toNumber}". Must be digits only with country code (e.g. 923001234567).`);
       err.statusCode = 400;
       throw err;
     }
 
-    const detail = await getTenantCredentials(businessId);
+    const detail = await getTenantCredentials(businessId, accountId);
 
     const payload = {
       messaging_product: 'whatsapp',
@@ -367,7 +371,7 @@ const whatsappService = {
       },
     };
 
-    const record = await createMessageRecord(businessId, toNumber, 'text', payload, senderId, receiverId);
+    const record = await createMessageRecord(businessId, detail.id, toNumber, 'text', payload, senderId, receiverId);
 
     const url = `${GRAPH_API_BASE}/${detail.phone_number_id}/messages`;
     try {
@@ -407,9 +411,10 @@ const whatsappService = {
    * @param {string} [filename]  - Optional filename (used for document type).
    * @param {number} [senderId]  - System user (agent) sending this message.
    * @param {number} [receiverId] - System user this message is associated with.
+   * @param {number} [accountId]  - whatsapp_details.id to send from.
    * @returns {Promise<object>}  - { record, metaResponse }
    */
-  sendMediaMessage: async (businessId, toNumber, mediaType, mediaUrl, caption = '', filename = '', senderId = null, receiverId = null, mediaId = null, localUrl = null) => {
+  sendMediaMessage: async (businessId, toNumber, mediaType, mediaUrl, caption = '', filename = '', senderId = null, receiverId = null, mediaId = null, localUrl = null, accountId = null) => {
     const VALID_TYPES = ['image', 'document', 'audio', 'video'];
     if (!VALID_TYPES.includes(mediaType)) {
       const err = new Error(`Invalid media type "${mediaType}". Must be one of: ${VALID_TYPES.join(', ')}.`);
@@ -423,7 +428,7 @@ const whatsappService = {
       throw err;
     }
 
-    const detail = await getTenantCredentials(businessId);
+    const detail = await getTenantCredentials(businessId, accountId);
 
     if (!mediaUrl && !mediaId) {
       const err = new Error('Either media_url or media_id is required.');
@@ -453,7 +458,7 @@ const whatsappService = {
       ? { ...payload, [mediaType]: { ...mediaObject, local_url: previewUrl } }
       : payload;
 
-    const record = await createMessageRecord(businessId, toNumber, mediaType, storedPayload, senderId, receiverId);
+    const record = await createMessageRecord(businessId, detail.id, toNumber, mediaType, storedPayload, senderId, receiverId);
 
     const url = `${GRAPH_API_BASE}/${detail.phone_number_id}/messages`;
     try {
@@ -594,7 +599,8 @@ const whatsappService = {
     if (mediaTypes.includes(message.type) && message[message.type]?.id) {
       try {
         const mediaId = message[message.type].id;
-        const downloadedMediaInfo = await whatsappService.downloadMedia(tenantId, mediaId);
+        // The media id only resolves with the token of the number it was sent to.
+        const downloadedMediaInfo = await whatsappService.downloadMedia(tenantId, mediaId, whatsappDetail.id);
         // Enrich the message payload with local url
         message[message.type].local_url = downloadedMediaInfo.local_url;
       } catch (dlErr) {
@@ -613,6 +619,7 @@ const whatsappService = {
     const conversation = await findOrCreateConversation({
       businessId: tenantId,
       platformName: PLATFORM,
+      accountId: whatsappDetail.id,
       contactIdentifier: message.from,
       contactName,
       createdBy: ownerId,
@@ -636,6 +643,7 @@ const whatsappService = {
         message: saved.toJSON(),
         conversation: {
           id: conversation.id,
+          account_id: conversation.account_id,
           contact_identifier: conversation.contact_identifier,
           contact_name: conversation.contact_name || contactName || null,
         },
@@ -717,12 +725,16 @@ const whatsappService = {
   /**
    * List WhatsApp conversation threads for a tenant, most recent first.
    * Each row carries the last message so the inbox can show a preview.
+   * accountId narrows the list to one connected number; omit it for all.
    */
-  getConversations: async (businessId, { limit = 50, offset = 0 } = {}) => {
+  getConversations: async (businessId, { limit = 50, offset = 0, accountId = null } = {}) => {
     const socialPlatformId = await getPlatformId(PLATFORM);
 
+    const where = { business_id: businessId, social_platform_id: socialPlatformId };
+    if (accountId) where.account_id = accountId;
+
     const { rows, count } = await Conversation.findAndCountAll({
-      where: { business_id: businessId, social_platform_id: socialPlatformId },
+      where,
       order: [['updated_at', 'DESC']],
       limit: Number(limit),
       offset: Number(offset),
@@ -744,15 +756,18 @@ const whatsappService = {
    *
    * Scoped by business_id so a tenant can never read another tenant's thread.
    * Passing a contact number instead of a conversation id is supported, so the
-   * UI can open a chat for a number typed in at runtime.
+   * UI can open a chat for a number typed in at runtime — the same number can
+   * have a thread on each connected account, so that path resolves accountId.
    */
-  getMessages: async (businessId, { conversationId = null, contact = null, limit = 100, offset = 0 } = {}) => {
+  getMessages: async (businessId, { conversationId = null, contact = null, accountId = null, limit = 100, offset = 0 } = {}) => {
     const socialPlatformId = await getPlatformId(PLATFORM);
 
     const where = { business_id: businessId, social_platform_id: socialPlatformId };
     if (conversationId) where.id = conversationId;
-    else if (contact) where.contact_identifier = String(contact).replace(/\D/g, '');
-    else {
+    else if (contact) {
+      where.contact_identifier = String(contact).replace(/\D/g, '');
+      where.account_id = (await getTenantCredentials(businessId, accountId)).id;
+    } else {
       const err = new Error('Either conversation_id or contact is required.');
       err.statusCode = 400;
       throw err;
@@ -790,9 +805,10 @@ const whatsappService = {
    *
    * @param {number} businessId - Tenant ID
    * @param {boolean} forceSync - If false, can fall back to local cache
+   * @param {number} [accountId] - whatsapp_details.id; templates are per WABA
    */
-  getTemplates: async (businessId, forceSync = true) => {
-    const detail = await getTenantCredentials(businessId);
+  getTemplates: async (businessId, forceSync = true, accountId = null) => {
+    const detail = await getTenantCredentials(businessId, accountId);
     if (!detail.waba_id) {
       const err = new Error(`WABA ID is not configured for business_id=${businessId}`);
       err.statusCode = 400;
@@ -809,6 +825,7 @@ const whatsappService = {
         for (const metaTpl of templatesData) {
           await WhatsappTemplate.upsert({
             business_id: businessId,
+            waba_id: detail.waba_id,
             meta_template_id: metaTpl.id,
             name: metaTpl.name,
             category: metaTpl.category,
@@ -826,7 +843,7 @@ const whatsappService = {
     }
 
     const templates = await WhatsappTemplate.findAll({
-      where: { business_id: businessId },
+      where: { business_id: businessId, waba_id: detail.waba_id },
       order: [['created_at', 'DESC']],
     });
 
@@ -845,8 +862,9 @@ const whatsappService = {
    *
    * @param {number} businessId
    * @param {object} templateData { name, category, language, components }
+   * @param {number} [accountId] - whatsapp_details.id whose WABA gets the template
    */
-  createTemplate: async (businessId, { name, category, language, components }) => {
+  createTemplate: async (businessId, { name, category, language, components }, accountId = null) => {
     // 1. Validation
     const nameRegex = /^[a-z0-9_]+$/;
     if (!nameRegex.test(name)) {
@@ -875,7 +893,7 @@ const whatsappService = {
       }
     }
 
-    const detail = await getTenantCredentials(businessId);
+    const detail = await getTenantCredentials(businessId, accountId);
     if (!detail.waba_id) {
       const err = new Error(`WABA ID is not configured for business_id=${businessId}`);
       err.statusCode = 400;
@@ -898,6 +916,7 @@ const whatsappService = {
 
       const [record] = await WhatsappTemplate.upsert({
         business_id: businessId,
+        waba_id: detail.waba_id,
         meta_template_id: metaTemplateId,
         name,
         category,
@@ -927,9 +946,10 @@ const whatsappService = {
    *
    * @param {number} businessId
    * @param {string} templateName
+   * @param {number} [accountId] - whatsapp_details.id whose WABA holds the template
    */
-  deleteTemplate: async (businessId, templateName) => {
-    const detail = await getTenantCredentials(businessId);
+  deleteTemplate: async (businessId, templateName, accountId = null) => {
+    const detail = await getTenantCredentials(businessId, accountId);
     if (!detail.waba_id) {
       const err = new Error(`WABA ID is not configured for business_id=${businessId}`);
       err.statusCode = 400;
@@ -943,7 +963,7 @@ const whatsappService = {
 
       if (response.data?.success) {
         await WhatsappTemplate.destroy({
-          where: { business_id: businessId, name: templateName },
+          where: { business_id: businessId, waba_id: detail.waba_id, name: templateName },
         });
       }
 
@@ -982,7 +1002,7 @@ const whatsappService = {
     try {
       const whereClause = message_template_id
         ? { meta_template_id: message_template_id }
-        : { business_id: detail.business_id, name: message_template_name };
+        : { business_id: detail.business_id, waba_id: wabaId, name: message_template_name };
 
       await WhatsappTemplate.update(updateFields, { where: whereClause });
     } catch (dbErr) {
@@ -997,44 +1017,13 @@ const whatsappService = {
     const { display_phone_number, event, current_limit } = eventValue;
     console.log(`[WEBHOOK] Phone Number Quality Update | Phone=${display_phone_number} | Event=${event} | Limit=${current_limit}`);
 
-    // Map display_phone_number to the correct details entry. Meta numbers can have leading plus or spaces or dashes, let's normalize to digits.
-    const normalizedPhone = display_phone_number.replace(/\D/g, '');
-    
-    // We look up via phone_number_id (since we have social_numbers or whatsapp_details).
-    // The request mentions "Map the phone number to the corresponding tenant in our database".
-    // We can lookup BusinessSocial -> SocialNumber or match display_phone_number with metadata if saved,
-    // or locate the WhatsappDetail by looking up the phone number in our DB.
-    // If our details table doesn't store display_phone_number directly, we can match phone number or phone_number_id if we have details.
-    // But since the webhook payload contains display_phone_number (e.g., "923001234567"), let's find the tenant by lookup on SocialNumber / BusinessSocial or similar, or lookup on whatsapp_details.
-    // In our models, SocialNumber belongs to Business. A Business can have BusinessSocial with type = 'whatsapp' linked to a SocialNumber.
-    // Let's find WhatsappDetail where we can match. Let's do a wide search or lookup the details.
-    // Since display_phone_number matches the customer's / tenant's Meta display number, let's look for a detail matching.
-    const detail = await WhatsappDetail.findOne({
-      include: [{
-        model: Business,
-        as: 'business',
-        include: [{
-          model: BusinessSocial,
-          as: 'businessSocials',
-          where: { type: 'whatsapp' },
-          include: [{
-            model: SocialNumber,
-            as: 'socialNumbers',
-            through: { attributes: [] }
-          }]
-        }]
-      }]
-    });
-    
-    // As a robust fallback, if there is only a direct link or we can find any detail with phone_number_id,
-    // let's look up WhatsappDetail. We can find by parsing or scanning details.
-    // Let's search all active details and check if display number matches or if we can match it.
-    const allDetails = await WhatsappDetail.findAll({ where: { is_active: true } });
-    const matchedDetail = allDetails.find(d => {
-      // If we don't have the display number in details, let's assume we can match it or use a default.
-      // For simplicity, let's assume display_phone_number maps to the tenant.
-      return true; // We will update the matched one or we can find by matching display_phone_number.
-    }) || allDetails[0];
+    // The event names the number only by its display form, and several numbers
+    // (across businesses) are connected — match exactly on the digits we stored
+    // at connect time, never fall back to some other tenant's number.
+    const normalizedPhone = String(display_phone_number || '').replace(/\D/g, '');
+    const matchedDetail = normalizedPhone
+      ? await WhatsappDetail.findOne({ where: { display_phone_number: normalizedPhone, is_active: true } })
+      : null;
 
     if (!matchedDetail) {
       console.warn(`[whatsappService._handlePhoneNumberQualityUpdate] No tenant found for phone=${display_phone_number}`);
@@ -1088,10 +1077,11 @@ const whatsappService = {
    * @param {Buffer} fileBuffer - The binary file buffer
    * @param {string} fileName - Original file name
    * @param {string} mimeType - The mime type of the file
+   * @param {number} [accountId] - whatsapp_details.id; the id only works from that number
    * @returns {Promise<object>} - Meta response containing the media id
    */
-  uploadMedia: async (businessId, fileBuffer, fileName, mimeType) => {
-    const detail = await getTenantCredentials(businessId);
+  uploadMedia: async (businessId, fileBuffer, fileName, mimeType, accountId = null) => {
+    const detail = await getTenantCredentials(businessId, accountId);
     const url = `${GRAPH_API_BASE}/${detail.phone_number_id}/media`;
 
     const FormData = require('form-data');
@@ -1126,10 +1116,11 @@ const whatsappService = {
    *
    * @param {number} businessId - Tenant ID
    * @param {string} mediaId - Meta media_id
+   * @param {number} [accountId] - whatsapp_details.id the media was sent to
    * @returns {Promise<object>} - Download metadata including local URL
    */
-  downloadMedia: async (businessId, mediaId) => {
-    const detail = await getTenantCredentials(businessId);
+  downloadMedia: async (businessId, mediaId, accountId = null) => {
+    const detail = await getTenantCredentials(businessId, accountId);
     
     // Step 2A: Retrieve Temporary Download URL
     const url = `${GRAPH_API_BASE}/${mediaId}`;
