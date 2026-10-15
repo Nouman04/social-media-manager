@@ -7,6 +7,8 @@ const cors = require("cors");
 const passport = require("passport");
 const initializePassport = require("./src/config/passportConfig");
 const realtime = require("./src/helpers/realtime");
+const campaignQueue = require("./src/queues/campaignQueue");
+const campaignService = require("./src/services/campaignService");
 const requestContext = require("./src/middleware/requestContext");
 
 const twoFactorAuthRoutes = require("./src/routes/twoFactorAuthRoutes");
@@ -21,6 +23,8 @@ const userRoutes = require("./src/routes/userRoutes");
 const countryRoutes = require("./src/routes/countryRoutes");
 const planRoutes = require("./src/routes/planRoutes");
 const subscriptionRoutes = require("./src/routes/subscriptionRoutes");
+const contactRoutes = require("./src/routes/contactRoutes");
+const campaignRoutes = require("./src/routes/campaignRoutes");
 
 const app = express();
 const PORT = process.env.NODE_PORT || process.env.PORT || 5000;
@@ -52,6 +56,8 @@ app.use("/api/v1/messenger", messengerRoutes);
 // Shared Instagram/Messenger webhook — one Callback URL for both.
 // WhatsApp keeps its own separate webhook (see whatsappRoutes.js).
 app.use("/api/v1/meta", metaWebhookRoutes);
+app.use("/api/v1/contacts", contactRoutes);
+app.use("/api/v1/campaigns", campaignRoutes);
 app.use("/users", userRoutes);
 app.use("/countries", countryRoutes);
 app.use("/plans", planRoutes);
@@ -88,5 +94,9 @@ realtime.init(server);
 server.listen(PORT, () => {
   console.log(`SMM App is listening at port: ${PORT}`);
 });
+
+// Campaign sends run from the BullMQ queue (Redis at REDIS_URL, default
+// redis://127.0.0.1:6379). Jobs survive restarts and resume here.
+campaignQueue.startWorker(campaignService.processRecipient);
 
 module.exports = app;

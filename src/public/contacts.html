@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Contacts — SMM</title>
+<!-- Reads .xlsx / .xls / .csv in the browser, so the server only ever sees JSON rows. -->
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #fff; --text: #1c1e21; --muted: #65676b;
+    --line: #dcdfe3; --blue: #1877f2; --blue-dark: #145dbf;
+    --err-bg: #fdeded; --err-line: #f5c2c0; --err-text: #a4262c;
+    --ok-bg: #edf7ee; --ok-line: #b7dfbb; --ok-text: #1e6c26;
+    --warn-bg: #fff8e6; --warn-line: #f0d68a; --warn-text: #6b5410;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; padding: 24px 16px; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px; }
+  .card.narrow { max-width: 420px; margin: 40px auto; }
+  h1 { margin: 0 0 4px; font-size: 21px; }
+  h2 { margin: 0 0 12px; font-size: 16px; }
+  .sub { margin: 0 0 18px; color: var(--muted); }
+
+  label { display: block; font-weight: 600; font-size: 13px; margin: 12px 0 5px; }
+  input, select {
+    width: 100%; padding: 9px 11px; font-size: 14px; font-family: inherit;
+    border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--text);
+  }
+  input[type=checkbox] { width: auto; margin: 0 8px 0 0; }
+  input:focus, select:focus { outline: 2px solid #b9d2ff; outline-offset: -1px; border-color: #6a9bff; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+  button {
+    padding: 9px 16px; font-size: 14px; font-weight: 600; font-family: inherit; color: #fff;
+    background: var(--blue); border: 0; border-radius: 7px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: var(--blue-dark); }
+  button:disabled { opacity: .55; cursor: not-allowed; }
+  button.full { width: 100%; margin-top: 16px; padding: 11px; }
+  button.ghost { background: none; color: var(--muted); font-weight: 500; padding: 4px 8px; }
+  button.ghost:hover:not(:disabled) { background: #eef0f3; }
+  button.danger { background: none; color: var(--err-text); font-weight: 500; padding: 4px 8px; }
+  button.danger:hover:not(:disabled) { background: var(--err-bg); }
+
+  .msg { margin-top: 14px; padding: 10px 13px; border-radius: 8px; display: none; }
+  .msg.show { display: block; }
+  .msg.error { background: var(--err-bg); border: 1px solid var(--err-line); color: var(--err-text); }
+  .msg.ok    { background: var(--ok-bg);  border: 1px solid var(--ok-line);  color: var(--ok-text); }
+  .msg.info  { background: #eef4ff; border: 1px solid #c3d7fb; color: #1b4a8f; }
+  .msg.warn  { background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--warn-text); }
+
+  .topbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; justify-content: space-between; margin-bottom: 16px; }
+  .topbar .biz { min-width: 220px; }
+  .topbar .biz label { margin-top: 0; }
+  .who { color: var(--muted); font-size: 13px; }
+
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 18px; overflow-x: auto; }
+  .tab {
+    background: none; color: var(--muted); border-radius: 0; padding: 10px 14px; font-weight: 600;
+    border-bottom: 2px solid transparent; white-space: nowrap;
+  }
+  .tab:hover:not(:disabled) { background: none; color: var(--text); }
+  .tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0 12px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .row > input, .row > select { flex: 1; min-width: 160px; }
+
+  .tablewrap { overflow-x: auto; margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: #f7f8fa; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .3px; }
+  tr:last-child td { border-bottom: 0; }
+  td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .empty { padding: 18px; text-align: center; color: var(--muted); }
+
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .badge.opted_in { background: #d9f0dd; color: var(--ok-text); }
+  .badge.opted_out { background: var(--err-bg); color: var(--err-text); }
+  .badge.unknown { background: #eceef1; color: var(--muted); }
+  .badge.valid { background: #d9f0dd; color: var(--ok-text); }
+  .badge.invalid { background: var(--err-bg); color: var(--err-text); }
+  td select.inline { width: auto; padding: 3px 6px; font-size: 12px; }
+  tr.selected td { background: #f2f7ff; }
+  .badge.whatsapp { background: #d9f7e3; color: #0f6b34; }
+  .badge.instagram { background: #fbe3f0; color: #9b1d5e; }
+  .badge.messenger { background: #e3edff; color: #1b4a8f; }
+  .tag { display: inline-block; background: #eef0f3; border-radius: 4px; padding: 0 6px; margin: 0 4px 2px 0; font-size: 12px; }
+
+  .pager { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; color: var(--muted); font-size: 13px; }
+  .progress { height: 8px; background: #eceef1; border-radius: 4px; overflow: hidden; margin-top: 14px; display: none; }
+  .progress.show { display: block; }
+  .progress > div { height: 100%; width: 0; background: var(--blue); transition: width .2s; }
+  .check { display: flex; align-items: flex-start; margin-top: 14px; font-weight: 500; }
+  .check input { margin-top: 3px; }
+  .section { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ── Sign in ─────────────────────────────────────────────────────────── -->
+  <div class="card narrow" id="loginCard">
+    <h1>Contacts</h1>
+    <p class="sub">Sign in to manage your contacts.</p>
+    <div id="loginStep1">
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username" placeholder="you@company.com" />
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" />
+      <button class="full" id="btnLogin">Sign in</button>
+    </div>
+    <div id="loginStep2" style="display:none">
+      <label for="code">Verification code</label>
+      <input id="code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code from your email" />
+      <button class="full" id="btnVerify">Verify &amp; continue</button>
+    </div>
+    <div id="loginMsg" class="msg"></div>
+  </div>
+
+  <!-- ── App ─────────────────────────────────────────────────────────────── -->
+  <div class="card" id="appCard" style="display:none">
+    <div class="topbar">
+      <div>
+        <h1>Contacts</h1>
+        <div class="who">Signed in as <strong id="whoName"></strong> · <button class="ghost" id="btnLogout">Sign out</button></div>
+      </div>
+      <div class="biz">
+        <label for="business">Business</label>
+        <select id="business"></select>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="contacts">Contacts</button>
+      <button class="tab" data-tab="import">Import from Excel</button>
+      <button class="tab" data-tab="channel">Channel users</button>
+    </div>
+
+    <!-- Contacts -->
+    <div class="panel active" id="panel-contacts">
+      <h2>Add a contact</h2>
+      <div class="grid">
+        <div><label for="cName">Name</label><input id="cName" placeholder="Ali Khan" /></div>
+        <div><label for="cPhone">Phone *</label><input id="cPhone" placeholder="923001234567 or 03001234567" /></div>
+        <div><label for="cEmail">Email</label><input id="cEmail" type="email" /></div>
+        <div><label for="cTags">Tags</label><input id="cTags" placeholder="vip, lahore" /></div>
+        <div>
+          <label for="cConsent">WhatsApp consent</label>
+          <select id="cConsent">
+            <option value="unknown">Unknown</option>
+            <option value="opted_in">Opted in</option>
+            <option value="opted_out">Opted out</option>
+          </select>
+        </div>
+      </div>
+      <button id="btnAdd" style="margin-top:14px">Add contact</button>
+      <div id="addMsg" class="msg"></div>
+
+      <div class="section">
+        <div class="row">
+          <input id="search" placeholder="Search name, phone or email…" />
+          <select id="filterConsent" style="max-width:170px">
+            <option value="">All consent</option>
+            <option value="opted_in">Opted in</option>
+            <option value="opted_out">Opted out</option>
+            <option value="unknown">Unknown</option>
+          </select>
+          <select id="filterWa" style="max-width:190px">
+            <option value="">All WhatsApp status</option>
+            <option value="valid">Verified on WhatsApp</option>
+            <option value="invalid">Not on WhatsApp</option>
+            <option value="unknown">Not checked yet</option>
+          </select>
+        </div>
+        <div class="tablewrap">
+          <table>
+            <thead><tr>
+              <th style="width:34px"><input type="checkbox" id="selectAll" title="Select all loaded contacts" /></th>
+              <th>Name</th><th>Phone</th><th>WhatsApp</th><th>Consent</th><th>Tags</th><th></th>
+            </tr></thead>
+            <tbody id="contactRows"></tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <span id="contactCount"></span>
+          <span>
+            <button class="ghost" id="loadMore">Load more</button>
+            <button class="ghost" id="loadAll">Load all</button>
+          </span>
+        </div>
+      </div>
+
+      <!-- Message the checked contacts -->
+      <div class="section" id="composer" style="display:none">
+        <h2 id="composerTitle">Message selected contacts</h2>
+        <div class="grid">
+          <div><label for="waAccount">Send from (WhatsApp number)</label><select id="waAccount"></select></div>
+          <div>
+            <label for="msgMode">Message type</label>
+            <select id="msgMode">
+              <option value="template">Template — reaches anyone opted in</option>
+              <option value="text">Text — only people who wrote in the last 24h</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="templateBox">
+          <label for="template">Approved template</label>
+          <select id="template"></select>
+          <div id="templateBody" class="hint"></div>
+          <div id="varBox"></div>
+          <div class="hint">In a variable, <code>{{contact.name|Customer}}</code> becomes each contact's name (or "Customer" when empty).</div>
+        </div>
+
+        <div id="textBox" style="display:none">
+          <label for="msgText">Message</label>
+          <textarea id="msgText" rows="3" style="width:100%;padding:9px 11px;font:inherit;border:1px solid var(--line);border-radius:6px"></textarea>
+          <div class="hint">WhatsApp only delivers free text to contacts who messaged you in the last 24 hours. Max 50 contacts.</div>
+        </div>
+
+        <div id="selectionNote" class="hint" style="margin-top:10px"></div>
+        <button id="btnSend" style="margin-top:12px">Send</button>
+        <div class="progress" id="sendProgress"><div id="sendProgressBar"></div></div>
+        <div id="sendMsg" class="msg"></div>
+      </div>
+    </div>
+
+    <!-- Import -->
+    <div class="panel" id="panel-import">
+      <h2>Import contacts from Excel or CSV</h2>
+      <p class="hint" style="margin-top:0">
+        First row must be column headings. A <strong>phone</strong> column is required; name, email, tags
+        (comma separated) and opt_in (yes / no) are optional. Existing contacts are updated by phone number.
+      </p>
+      <div class="grid">
+        <div><label for="file">File (.xlsx, .xls, .csv)</label><input id="file" type="file" accept=".xlsx,.xls,.csv" /></div>
+        <div>
+          <label for="countryCode">Default country code</label>
+          <input id="countryCode" value="92" inputmode="numeric" />
+          <div class="hint">Added to local numbers: 0300… or 300… become 92300…. Numbers starting with + are left as they are.</div>
+        </div>
+      </div>
+
+      <div id="mapping" style="display:none">
+        <div class="section">
+          <h2 id="mapTitle">Columns</h2>
+          <div class="grid">
+            <div><label for="mapPhone">Phone *</label><select id="mapPhone"></select></div>
+            <div><label for="mapName">Name</label><select id="mapName"></select></div>
+            <div><label for="mapEmail">Email</label><select id="mapEmail"></select></div>
+            <div><label for="mapTags">Tags</label><select id="mapTags"></select></div>
+            <div><label for="mapOptIn">Opt-in</label><select id="mapOptIn"></select></div>
+          </div>
+          <div class="tablewrap"><table><thead id="previewHead"></thead><tbody id="previewBody"></tbody></table></div>
+          <div class="hint">Showing the first 5 rows.</div>
+
+          <label class="check">
+            <input type="checkbox" id="consentConfirmed" />
+            <span>Everyone in this file agreed to receive WhatsApp messages from this business.
+              <span class="hint" style="display:block">Rows with their own opt-in value keep it, and contacts who opted out are never re-subscribed.
+              Campaigns only reach opted-in contacts.</span></span>
+          </label>
+          <button class="full" id="btnImport">Import</button>
+          <div class="progress" id="progress"><div id="progressBar"></div></div>
+        </div>
+      </div>
+      <div id="importMsg" class="msg"></div>
+      <div id="failedWrap" style="display:none">
+        <div class="tablewrap">
+          <table><thead><tr><th>Row</th><th>Phone</th><th>Problem</th></tr></thead><tbody id="failedRows"></tbody></table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Channel users -->
+    <div class="panel" id="panel-channel">
+      <h2>Everyone who messaged your WhatsApp, Instagram and Messenger accounts</h2>
+      <div class="row">
+        <input id="chSearch" placeholder="Search name or id…" />
+        <select id="chPlatform" style="max-width:180px">
+          <option value="">All channels</option>
+          <option value="whatsapp">WhatsApp</option>
+          <option value="instagram">Instagram</option>
+          <option value="messenger">Messenger</option>
+        </select>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Channel</th><th>Account</th><th>Name</th><th>Phone / ID</th><th>Last activity</th></tr></thead>
+          <tbody id="channelRows"></tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <span id="channelCount"></span>
+        <span><button class="ghost" id="chPrev">← Prev</button><button class="ghost" id="chNext">Next →</button></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var API = window.location.origin;
+  var PAGE = 50;
+  var CHUNK = 500; // rows per import request — keeps each body under the server's JSON limit
+  var auth = { token: null, user: null };
+  var channelOffset = 0;
+  var sheetRows = [], sheetHeaders = [];
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  function say(id, text, kind) {
+    var m = $(id);
+    if (!text) { m.className = 'msg'; return; }
+    m.textContent = text;
+    m.className = 'msg show ' + (kind || 'info');
+  }
+
+  function api(method, path, body) {
+    var opts = { method: method, headers: { 'Content-Type': 'application/json' } };
+    if (auth.token) opts.headers.Authorization = 'Bearer ' + auth.token;
+    if (body) opts.body = JSON.stringify(body);
+    return fetch(API + path, opts).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (b) {
+        if (r.status === 401) { logout(); throw new Error('Session expired — sign in again.'); }
+        if (!r.ok) throw new Error(b.message || ('Request failed (' + r.status + ')'));
+        return b;
+      });
+    });
+  }
+  function bizId() { return Number($('business').value); }
+  function qs(params) {
+    params.business_id = bizId();
+    return '?' + new URLSearchParams(Object.keys(params).reduce(function (o, k) {
+      if (params[k] !== '' && params[k] !== null && params[k] !== undefined) o[k] = params[k];
+      return o;
+    }, {})).toString();
+  }
+  function el(tag, text, cls) {
+    var e = document.createElement(tag);
+    if (text !== undefined && text !== null) e.textContent = text;
+    if (cls) e.className = cls;
+    return e;
+  }
+  function emptyRow(tbody, cols, text) {
+    var tr = el('tr'); var td = el('td', text, 'empty'); td.colSpan = cols; tr.appendChild(td); tbody.appendChild(tr);
+  }
+  function debounce(fn, ms) { var t; return function () { clearTimeout(t); t = setTimeout(fn, ms); }; }
+
+  // ── Sign in (shares the session the connect / chat pages store) ───────────
+  try {
+    var saved = JSON.parse(sessionStorage.getItem('smm_auth') || 'null');
+    if (saved && saved.token) auth = saved;
+  } catch (e) {}
+
+  $('btnLogin').addEventListener('click', function () {
+    var email = $('email').value.trim(), password = $('password').value;
+    if (!email || !password) { say('loginMsg', 'Enter your email and password.', 'error'); return; }
+    api('POST', '/auth/login', { email: email, password: password })
+      .then(function () {
+        $('loginStep1').style.display = 'none'; $('loginStep2').style.display = 'block';
+        say('loginMsg', 'We emailed a 6-digit code to ' + email + '.', 'info');
+      })
+      .catch(function (e) { say('loginMsg', e.message, 'error'); });
+  });
+
+  $('btnVerify').addEventListener('click', function () {
+    api('POST', '/auth/verify-2fa', { email: $('email').value.trim(), code: $('code').value.trim() })
+      .then(function (b) {
+        auth = { token: b.token, user: b.user };
+        try { sessionStorage.setItem('smm_auth', JSON.stringify(auth)); } catch (e) {}
+        enterApp();
+      })
+      .catch(function (e) { say('loginMsg', e.message, 'error'); });
+  });
+
+  function logout() {
+    auth = { token: null, user: null };
+    try { sessionStorage.removeItem('smm_auth'); } catch (e) {}
+    $('appCard').style.display = 'none'; $('loginCard').style.display = 'block';
+    $('loginStep1').style.display = 'block'; $('loginStep2').style.display = 'none';
+  }
+  $('btnLogout').addEventListener('click', logout);
+
+  function enterApp() {
+    var u = auth.user || {};
+    var list = u.businesses || [];
+    $('whoName').textContent = u.name || u.email || 'you';
+    $('loginCard').style.display = 'none'; $('appCard').style.display = 'block';
+
+    var sel = $('business'); sel.innerHTML = '';
+    if (!list.length) {
+      sel.appendChild(el('option', 'No business on this account')); sel.disabled = true;
+      say('addMsg', 'This account does not belong to any business.', 'warn');
+      return;
+    }
+    list.forEach(function (b) {
+      var o = el('option', b.name + (b.is_owner ? ' (owner)' : '')); o.value = b.id; sel.appendChild(o);
+    });
+    resetContacts();
+  }
+
+  $('business').addEventListener('change', function () {
+    channelOffset = 0;
+    accountsFor = null; // reload that business's WhatsApp numbers
+    resetContacts();
+    if ($('panel-channel').classList.contains('active')) loadChannelUsers();
+  });
+
+  // ── Tabs ──────────────────────────────────────────────────────────────────
+  Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (t) {
+    t.addEventListener('click', function () {
+      Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (x) { x.classList.remove('active'); });
+      Array.prototype.forEach.call(document.querySelectorAll('.panel'), function (x) { x.classList.remove('active'); });
+      t.classList.add('active');
+      $('panel-' + t.dataset.tab).classList.add('active');
+      if (t.dataset.tab === 'channel') loadChannelUsers();
+      // Keep ticks and loaded rows when just switching back; reload after an import.
+      if (t.dataset.tab === 'contacts' && contactsStale) resetContacts();
+    });
+  });
+
+  // ── Contacts ──────────────────────────────────────────────────────────────
+  // The list grows in steps of CONTACT_STEP ("Load more") or all at once
+  // ("Load all"); ticked contacts stay ticked while more rows load.
+  var CONTACT_STEP = 7;
+  var loaded = [], totalContacts = 0;
+  var selected = {}; // id -> contact
+  var contactsStale = false;
+  var WA_LABEL = { valid: '✓ Verified', invalid: '✗ Not on WhatsApp', unknown: 'Not checked' };
+
+  function contactFilters(offset, limit) {
+    return qs({
+      search: $('search').value.trim(), consent: $('filterConsent').value,
+      whatsapp_status: $('filterWa').value, limit: limit, offset: offset
+    });
+  }
+
+  function resetContacts() {
+    loaded = []; totalContacts = 0; selected = {}; contactsStale = false;
+    loadContacts(CONTACT_STEP);
+  }
+
+  function loadContacts(limit) {
+    return api('GET', '/api/v1/contacts' + contactFilters(loaded.length, limit))
+      .then(function (b) {
+        loaded = loaded.concat(b.contacts);
+        totalContacts = b.total;
+        renderContacts();
+      })
+      .catch(function (e) { var tbody = $('contactRows'); tbody.innerHTML = ''; emptyRow(tbody, 7, e.message); });
+  }
+
+  // Pages of 500 (the API's cap) until everything is on screen. Stops when a
+  // page adds nothing, so rows deleted meanwhile can't loop it forever.
+  function loadAllContacts() {
+    $('loadAll').disabled = true;
+    (function more() {
+      var before = loaded.length;
+      loadContacts(500).then(function () {
+        if (loaded.length < totalContacts && loaded.length > before) more();
+      });
+    })();
+  }
+
+  function renderContacts() {
+    var tbody = $('contactRows');
+    tbody.innerHTML = '';
+    if (!loaded.length) emptyRow(tbody, 7, 'No contacts yet — add one above, import a file, or message someone from the WhatsApp inbox.');
+
+    loaded.forEach(function (c) {
+      var tr = el('tr');
+      if (selected[c.id]) tr.className = 'selected';
+
+      var pick = el('td'); var box = el('input'); box.type = 'checkbox'; box.checked = !!selected[c.id];
+      box.addEventListener('change', function () {
+        if (box.checked) selected[c.id] = c; else delete selected[c.id];
+        tr.className = box.checked ? 'selected' : '';
+        updateSelection();
+      });
+      pick.appendChild(box); tr.appendChild(pick);
+
+      tr.appendChild(el('td', c.name || '—'));
+      tr.appendChild(el('td', c.phone, 'mono'));
+
+      var wa = el('td'); wa.appendChild(el('span', WA_LABEL[c.whatsapp_status] || c.whatsapp_status, 'badge ' + c.whatsapp_status));
+      wa.title = c.whatsapp_checked_at ? 'Last checked ' + new Date(c.whatsapp_checked_at).toLocaleString() : 'No message result yet';
+      tr.appendChild(wa);
+
+      var consentTd = el('td'); var consent = el('select', null, 'inline');
+      [['opted_in', 'Opted in'], ['opted_out', 'Opted out'], ['unknown', 'Unknown']].forEach(function (o) {
+        var opt = el('option', o[1]); opt.value = o[0]; consent.appendChild(opt);
+      });
+      consent.value = c.whatsapp_consent;
+      consent.addEventListener('change', function () {
+        api('PATCH', '/api/v1/contacts/' + c.id, { business_id: bizId(), whatsapp_consent: consent.value })
+          .then(function (b) { c.whatsapp_consent = b.contact.whatsapp_consent; updateSelection(); })
+          .catch(function (e) { consent.value = c.whatsapp_consent; say('addMsg', e.message, 'error'); });
+      });
+      consentTd.appendChild(consent); tr.appendChild(consentTd);
+
+      var tags = el('td'); (c.tags || []).forEach(function (t) { tags.appendChild(el('span', t, 'tag')); });
+      tr.appendChild(tags);
+
+      var act = el('td'); var del = el('button', 'Delete', 'danger');
+      del.addEventListener('click', function () {
+        if (!confirm('Delete ' + (c.name || c.phone) + '?')) return;
+        api('DELETE', '/api/v1/contacts/' + c.id + qs({})).then(resetContacts)
+          .catch(function (e) { say('addMsg', e.message, 'error'); });
+      });
+      act.appendChild(del); tr.appendChild(act);
+      tbody.appendChild(tr);
+    });
+
+    $('contactCount').textContent = totalContacts ? 'Showing ' + loaded.length + ' of ' + totalContacts : '';
+    var done = loaded.length >= totalContacts;
+    $('loadMore').disabled = done; $('loadAll').disabled = done;
+    updateSelection();
+  }
+
+  function selectedList() { return Object.keys(selected).map(function (id) { return selected[id]; }); }
+
+  function updateSelection() {
+    var list = selectedList();
+    $('selectAll').checked = loaded.length > 0 && loaded.every(function (c) { return selected[c.id]; });
+    $('composer').style.display = list.length ? 'block' : 'none';
+    $('composerTitle').textContent = 'Message ' + list.length + ' selected contact' + (list.length === 1 ? '' : 's');
+    if (list.length) { loadWaAccounts(); updateSelectionNote(); }
+  }
+
+  // Tell the user up front who a template send will skip, and why.
+  function updateSelectionNote() {
+    var list = selectedList();
+    var note = '';
+    if ($('msgMode').value === 'template') {
+      var notIn = list.filter(function (c) { return c.whatsapp_consent !== 'opted_in'; }).length;
+      var invalid = list.filter(function (c) { return c.whatsapp_consent === 'opted_in' && c.whatsapp_status === 'invalid'; }).length;
+      var reach = list.length - notIn - invalid;
+      note = reach + ' will receive it.';
+      if (notIn) note += ' ' + notIn + ' skipped — not opted in (change Consent in the list).';
+      if (invalid) note += ' ' + invalid + ' skipped — not on WhatsApp.';
+    } else if (list.length > 50) {
+      note = 'Text can go to at most 50 contacts at once — untick some, or use a template.';
+    }
+    $('selectionNote').textContent = note;
+  }
+
+  $('selectAll').addEventListener('change', function () {
+    var on = this.checked;
+    loaded.forEach(function (c) { if (on) selected[c.id] = c; else delete selected[c.id]; });
+    renderContacts();
+  });
+  $('loadMore').addEventListener('click', function () { loadContacts(CONTACT_STEP); });
+  $('loadAll').addEventListener('click', loadAllContacts);
+  $('search').addEventListener('input', debounce(resetContacts, 300));
+  $('filterConsent').addEventListener('change', resetContacts);
+  $('filterWa').addEventListener('change', resetContacts);
+
+  // ── Composer ──────────────────────────────────────────────────────────────
+  var accountsFor = null, templates = [];
+
+  function loadWaAccounts() {
+    if (accountsFor === bizId()) return;
+    accountsFor = bizId();
+    var sel = $('waAccount'); sel.innerHTML = '';
+    fetch(API + '/api/v1/whatsapp/accounts?business_id=' + bizId(), { headers: { Authorization: 'Bearer ' + auth.token } })
+      .then(function (r) { return r.json(); })
+      .then(function (b) {
+        var active = (b.accounts || []).filter(function (a) { return a.is_active; });
+        if (!active.length) {
+          sel.appendChild(el('option', 'No WhatsApp number connected')); $('btnSend').disabled = true;
+          return;
+        }
+        $('btnSend').disabled = false;
+        active.forEach(function (a) {
+          var o = el('option', (a.display_phone_number ? '+' + a.display_phone_number : a.phone_number_id)); o.value = a.id; sel.appendChild(o);
+        });
+        loadTemplates();
+      })
+      .catch(function (e) { say('sendMsg', e.message, 'error'); });
+  }
+
+  function loadTemplates() {
+    var sel = $('template'); sel.innerHTML = '';
+    sel.appendChild(el('option', 'Loading…'));
+    fetch(API + '/api/v1/whatsapp/templates?business_id=' + bizId() + '&account_id=' + $('waAccount').value,
+      { headers: { Authorization: 'Bearer ' + auth.token } })
+      .then(function (r) { return r.json(); })
+      .then(function (b) {
+        templates = (b.templates || []).filter(function (t) { return t.status === 'APPROVED'; });
+        sel.innerHTML = '';
+        if (!templates.length) { sel.appendChild(el('option', 'No approved templates on this number')); renderVariables(); return; }
+        templates.forEach(function (t, i) {
+          var o = el('option', t.name + ' (' + t.language + ' · ' + t.category + ')'); o.value = i; sel.appendChild(o);
+        });
+        renderVariables();
+      })
+      .catch(function (e) { sel.innerHTML = ''; say('sendMsg', e.message, 'error'); });
+  }
+
+  function currentTemplate() { return templates[Number($('template').value)] || null; }
+
+  // One input per {{n}} in the template body, in order.
+  function renderVariables() {
+    var t = currentTemplate();
+    var box = $('varBox'); box.innerHTML = '';
+    var body = t && (t.components || []).find(function (c) { return c.type === 'BODY'; });
+    var header = t && (t.components || []).find(function (c) { return c.type === 'HEADER'; });
+    $('templateBody').textContent = body ? body.text : '';
+
+    var count = 0;
+    String(body && body.text || '').replace(/\{\{(\d+)\}\}/g, function (_, n) { count = Math.max(count, Number(n)); });
+    for (var i = 1; i <= count; i++) {
+      var lab = el('label', 'Variable {{' + i + '}}'); lab.htmlFor = 'var' + i;
+      var inp = el('input'); inp.id = 'var' + i; inp.className = 'tplvar';
+      inp.value = i === 1 ? '{{contact.name|Customer}}' : '';
+      box.appendChild(lab); box.appendChild(inp);
+    }
+    if (header && /\{\{\d+\}\}/.test(header.text || '') || header && header.format && header.format !== 'TEXT') {
+      box.appendChild(el('div', 'This template has a media or variable header, which quick send does not fill yet — pick another template.', 'hint'));
+    }
+  }
+
+  $('waAccount').addEventListener('change', loadTemplates);
+  $('template').addEventListener('change', renderVariables);
+  $('msgMode').addEventListener('change', function () {
+    var text = this.value === 'text';
+    $('templateBox').style.display = text ? 'none' : 'block';
+    $('textBox').style.display = text ? 'block' : 'none';
+    updateSelectionNote();
+  });
+
+  $('btnSend').addEventListener('click', function () {
+    var list = selectedList();
+    var btn = this;
+    if (!list.length) return;
+    say('sendMsg', '');
+
+    if ($('msgMode').value === 'text') {
+      var body = $('msgText').value.trim();
+      if (!body) { say('sendMsg', 'Write a message first.', 'error'); return; }
+      btn.disabled = true; say('sendMsg', 'Sending…', 'info');
+      api('POST', '/api/v1/campaigns/send-text', {
+        business_id: bizId(), account_id: Number($('waAccount').value),
+        contact_ids: list.map(function (c) { return c.id; }), body: body
+      })
+        .then(function (b) {
+          var firstErr = (b.results.find(function (r) { return r.status === 'failed'; }) || {}).error;
+          say('sendMsg', b.sent + ' sent, ' + b.failed + ' failed.' + (firstErr ? ' First error: ' + firstErr : '') +
+              ' Sent messages that fall outside the 24h window still fail later — watch the WhatsApp column.',
+              b.failed ? 'warn' : 'ok');
+        })
+        .catch(function (e) { say('sendMsg', e.message, 'error'); })
+        .then(function () { btn.disabled = false; });
+      return;
+    }
+
+    var t = currentTemplate();
+    if (!t) { say('sendMsg', 'Pick an approved template.', 'error'); return; }
+    var variables = Array.prototype.map.call(document.querySelectorAll('.tplvar'), function (i) { return i.value; });
+    if (variables.some(function (v) { return !v.trim(); })) { say('sendMsg', 'Fill every template variable.', 'error'); return; }
+
+    btn.disabled = true; say('sendMsg', 'Creating the send…', 'info');
+    api('POST', '/api/v1/campaigns', {
+      business_id: bizId(),
+      name: 'Quick send · ' + new Date().toLocaleString(),
+      account_id: Number($('waAccount').value),
+      template_name: t.name, language: t.language,
+      variables: variables,
+      audience: { contact_ids: list.map(function (c) { return c.id; }) }
+    })
+      .then(function (b) {
+        if (!b.estimated_recipients) throw new Error('None of the selected contacts can receive a template — they must be opted in and not marked "Not on WhatsApp".');
+        return api('POST', '/api/v1/campaigns/' + b.campaign.id + '/send', { business_id: bizId() })
+          .then(function () { watchCampaign(b.campaign.id, btn); });
+      })
+      .catch(function (e) { btn.disabled = false; say('sendMsg', e.message, 'error'); });
+  });
+
+  // Poll the campaign while the queue works through it, showing % done.
+  function watchCampaign(id, btn) {
+    $('sendProgress').className = 'progress show';
+    api('GET', '/api/v1/campaigns/' + id + qs({}))
+      .then(function (b) {
+        var s = b.stats;
+        $('sendProgressBar').style.width = s.percent + '%';
+        var line = s.sent + ' sent · ' + s.delivered + ' delivered · ' + s.read + ' read · ' + s.failed + ' failed';
+        if (b.is_running) {
+          say('sendMsg', s.percent + '% — ' + (s.total - s.queued) + ' of ' + s.total + ' processed (' + line + ')', 'info');
+          setTimeout(function () { watchCampaign(id, btn); }, 2000);
+          return;
+        }
+        btn.disabled = false;
+        say('sendMsg', '100% done — ' + line + '. Delivery ticks keep updating; the WhatsApp column shows who is verified.', s.failed ? 'warn' : 'ok');
+      })
+      .catch(function (e) { btn.disabled = false; say('sendMsg', e.message, 'error'); });
+  }
+
+  $('btnAdd').addEventListener('click', function () {
+    if (!$('cPhone').value.trim()) { say('addMsg', 'Phone is required.', 'error'); return; }
+    api('POST', '/api/v1/contacts', {
+      business_id: bizId(),
+      name: $('cName').value.trim(),
+      phone: $('cPhone').value.trim(),
+      email: $('cEmail').value.trim(),
+      tags: $('cTags').value,
+      whatsapp_consent: $('cConsent').value,
+      default_country_code: $('countryCode').value.trim()
+    })
+      .then(function (b) {
+        say('addMsg', 'Added ' + (b.contact.name || b.contact.phone) + '.', 'ok');
+        ['cName', 'cPhone', 'cEmail', 'cTags'].forEach(function (id) { $(id).value = ''; });
+        resetContacts();
+      })
+      .catch(function (e) { say('addMsg', e.message, 'error'); });
+  });
+
+  // ── Import ────────────────────────────────────────────────────────────────
+  // Heading words that identify each column, so most files need no mapping.
+  var GUESS = {
+    mapPhone: ['phone', 'mobile', 'number', 'whatsapp', 'cell', 'contact', 'phone number', 'mobile number'],
+    mapName: ['name', 'full name', 'customer', 'customer name', 'first name'],
+    mapEmail: ['email', 'e-mail', 'mail'],
+    mapTags: ['tags', 'tag', 'labels', 'group', 'segment'],
+    mapOptIn: ['opt_in', 'opt-in', 'optin', 'opt in', 'consent', 'subscribed', 'whatsapp consent']
+  };
+
+  $('file').addEventListener('change', function () {
+    var f = this.files[0];
+    say('importMsg', ''); $('failedWrap').style.display = 'none'; $('mapping').style.display = 'none';
+    if (!f) return;
+    if (typeof XLSX === 'undefined') { say('importMsg', 'The spreadsheet reader failed to load — check your internet connection.', 'error'); return; }
+
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      try {
+        // raw:true on read keeps CSV cells as text (03001234567 keeps its 0);
+        // raw values on sheet_to_json avoid Excel's "9.23E+11" display format.
+        var wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', raw: true });
+        var ws = wb.Sheets[wb.SheetNames[0]];
+        sheetRows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: true }).map(function (r) {
+          Object.keys(r).forEach(function (k) { r[k] = String(r[k]).trim(); });
+          return r;
+        });
+        sheetHeaders = sheetRows.length ? Object.keys(sheetRows[0]) : [];
+      } catch (err) {
+        say('importMsg', 'Could not read this file: ' + err.message, 'error'); return;
+      }
+      if (!sheetRows.length) { say('importMsg', 'The first sheet has no rows.', 'warn'); return; }
+      showMapping(f.name);
+    };
+    reader.readAsArrayBuffer(f);
+  });
+
+  function showMapping(fileName) {
+    Object.keys(GUESS).forEach(function (id) {
+      var sel = $(id); sel.innerHTML = '';
+      sel.appendChild(el('option', id === 'mapPhone' ? '— choose column —' : '— none —')).value = '';
+      sheetHeaders.forEach(function (h) { var o = el('option', h); o.value = h; sel.appendChild(o); });
+      var match = sheetHeaders.find(function (h) { return GUESS[id].indexOf(String(h).trim().toLowerCase()) !== -1; });
+      sel.value = match || '';
+    });
+    $('mapTitle').textContent = fileName + ' — ' + sheetRows.length + ' row(s)';
+
+    var head = $('previewHead'), body = $('previewBody');
+    head.innerHTML = ''; body.innerHTML = '';
+    var hr = el('tr'); sheetHeaders.forEach(function (h) { hr.appendChild(el('th', h)); }); head.appendChild(hr);
+    sheetRows.slice(0, 5).forEach(function (r) {
+      var tr = el('tr'); sheetHeaders.forEach(function (h) { tr.appendChild(el('td', r[h])); }); body.appendChild(tr);
+    });
+    $('mapping').style.display = 'block';
+    if (!$('mapPhone').value) say('importMsg', 'Pick which column holds the phone number.', 'warn');
+  }
+
+  $('btnImport').addEventListener('click', function () {
+    var col = {};
+    Object.keys(GUESS).forEach(function (id) { col[id] = $(id).value; });
+    if (!col.mapPhone) { say('importMsg', 'Pick which column holds the phone number.', 'error'); return; }
+
+    var rows = sheetRows.map(function (r) {
+      return {
+        phone: r[col.mapPhone],
+        name: col.mapName ? r[col.mapName] : '',
+        email: col.mapEmail ? r[col.mapEmail] : '',
+        tags: col.mapTags ? r[col.mapTags] : '',
+        opt_in: col.mapOptIn ? r[col.mapOptIn] : ''
+      };
+    });
+
+    var totals = { created: 0, updated: 0, failed: [] };
+    var btn = this; btn.disabled = true;
+    $('progress').className = 'progress show'; $('progressBar').style.width = '0%';
+    say('importMsg', 'Importing…', 'info');
+
+    // Chunks go one after another so row numbers in errors stay meaningful.
+    var start = 0;
+    (function next() {
+      if (start >= rows.length) return done();
+      var chunk = rows.slice(start, start + CHUNK);
+      var offset = start;
+      api('POST', '/api/v1/contacts/import', {
+        business_id: bizId(),
+        rows: chunk,
+        consent_confirmed: $('consentConfirmed').checked,
+        default_country_code: $('countryCode').value.trim()
+      })
+        .then(function (b) {
+          totals.created += b.created; totals.updated += b.updated;
+          b.failed.forEach(function (f) { f.row += offset + 1; totals.failed.push(f); }); // +1 for the heading row
+          start += CHUNK;
+          $('progressBar').style.width = Math.round(Math.min(start, rows.length) / rows.length * 100) + '%';
+          next();
+        })
+        .catch(function (e) {
+          btn.disabled = false;
+          say('importMsg', 'Stopped at row ' + (offset + 2) + ': ' + e.message +
+              ' (' + totals.created + ' added, ' + totals.updated + ' updated before that)', 'error');
+        });
+    })();
+
+    function done() {
+      btn.disabled = false;
+      say('importMsg', totals.created + ' added, ' + totals.updated + ' updated' +
+          (totals.failed.length ? ', ' + totals.failed.length + ' skipped (see below).' : '.'),
+          totals.failed.length ? 'warn' : 'ok');
+      var tbody = $('failedRows'); tbody.innerHTML = '';
+      totals.failed.slice(0, 200).forEach(function (f) {
+        var tr = el('tr'); tr.appendChild(el('td', f.row)); tr.appendChild(el('td', f.phone, 'mono')); tr.appendChild(el('td', f.error));
+        tbody.appendChild(tr);
+      });
+      $('failedWrap').style.display = totals.failed.length ? 'block' : 'none';
+      contactsStale = true;
+    }
+  });
+
+  // ── Channel users ─────────────────────────────────────────────────────────
+  function loadChannelUsers() {
+    var tbody = $('channelRows');
+    api('GET', '/api/v1/contacts/channel-users' + qs({
+      platform: $('chPlatform').value, search: $('chSearch').value.trim(), limit: PAGE, offset: channelOffset
+    }))
+      .then(function (b) {
+        tbody.innerHTML = '';
+        if (!b.users.length) emptyRow(tbody, 5, 'Nobody has messaged your connected accounts yet.');
+        b.users.forEach(function (u) {
+          var tr = el('tr');
+          var ch = el('td'); ch.appendChild(el('span', u.platform, 'badge ' + u.platform)); tr.appendChild(ch);
+          tr.appendChild(el('td', u.account_label || '—'));
+          tr.appendChild(el('td', u.contact_name || '—'));
+          tr.appendChild(el('td', u.contact_identifier, 'mono'));
+          tr.appendChild(el('td', u.last_activity_at ? new Date(u.last_activity_at).toLocaleString() : ''));
+          tbody.appendChild(tr);
+        });
+        $('channelCount').textContent = b.total
+          ? (channelOffset + 1) + '–' + (channelOffset + b.users.length) + ' of ' + b.total : '';
+        $('chPrev').disabled = channelOffset === 0;
+        $('chNext').disabled = channelOffset + b.users.length >= b.total;
+      })
+      .catch(function (e) { tbody.innerHTML = ''; emptyRow(tbody, 5, e.message); });
+  }
+  $('chSearch').addEventListener('input', debounce(function () { channelOffset = 0; loadChannelUsers(); }, 300));
+  $('chPlatform').addEventListener('change', function () { channelOffset = 0; loadChannelUsers(); });
+  $('chPrev').addEventListener('click', function () { channelOffset = Math.max(0, channelOffset - PAGE); loadChannelUsers(); });
+  $('chNext').addEventListener('click', function () { channelOffset += PAGE; loadChannelUsers(); });
+
+  if (auth.token && auth.user) enterApp();
+})();
+</script>
+</body>
+</html>

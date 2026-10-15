@@ -5,6 +5,10 @@ const { Op } = require('sequelize');
 const { WhatsappDetail, WhatsappMessage, WhatsappTemplate, Business, Conversation } = require('../../models');
 const { findOrCreateConversation, getPlatformId } = require('../helpers/conversationHelper');
 const { resolveAccount, listAccounts } = require('../helpers/accountHelper');
+const { recordWhatsappContact } = require('./contactService');
+
+// Meta's "message undeliverable" — most often the number is not on WhatsApp.
+const UNDELIVERABLE_CODE = 131026;
 const realtime = require('../helpers/realtime');
 
 const GRAPH_API_BASE = 'https://graph.facebook.com/v18.0';
@@ -50,6 +54,9 @@ const createMessageRecord = async (businessId, accountId, toNumber, messageType,
     contactIdentifier: toNumber,
     createdBy: senderId,
   });
+
+  // Anyone the business messages from the inbox joins its contact book.
+  await recordWhatsappContact(businessId, toNumber);
 
   return WhatsappMessage.create({
     conversation_id: conversation.id,
@@ -625,6 +632,9 @@ const whatsappService = {
       createdBy: ownerId,
     });
 
+    // They wrote to us on WhatsApp, so the number is on WhatsApp.
+    await recordWhatsappContact(tenantId, message.from, { name: contactName, status: 'valid' });
+
     try {
       const saved = await WhatsappMessage.create({
         conversation_id: conversation.id,
@@ -704,6 +714,16 @@ const whatsappService = {
       }
 
       await record.update(updateData);
+
+      // A delivered/read receipt proves the number is on WhatsApp; 131026
+      // ("undeliverable") is the closest Meta comes to saying it isn't.
+      if (record.direction === 'outbound' && record.to_number) {
+        if (mappedStatus === 'delivered' || mappedStatus === 'read') {
+          await recordWhatsappContact(tenantId, record.to_number, { status: 'valid' });
+        } else if (mappedStatus === 'failed' && Number(updateData.error_code) === UNDELIVERABLE_CODE) {
+          await recordWhatsappContact(tenantId, record.to_number, { status: 'invalid' });
+        }
+      }
 
       realtime.emitToBusiness(tenantId, 'message:status', {
         id: record.id,
