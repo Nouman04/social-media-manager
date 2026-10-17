@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Posts &amp; Comments — SMM</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #fff; --text: #1c1e21; --muted: #65676b;
+    --line: #dcdfe3; --blue: #1877f2; --blue-dark: #145dbf; --ig: #c13584;
+    --err-bg: #fdeded; --err-line: #f5c2c0; --err-text: #a4262c;
+    --ok-bg: #edf7ee; --ok-line: #b7dfbb; --ok-text: #1e6c26;
+    --warn-bg: #fff8e6; --warn-line: #f0d68a; --warn-text: #6b5410;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; padding: 24px 16px; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px; }
+  .card.narrow { max-width: 420px; margin: 40px auto; }
+  h1 { margin: 0 0 4px; font-size: 21px; }
+  .sub { margin: 0 0 18px; color: var(--muted); }
+  label { display: block; font-weight: 600; font-size: 13px; margin: 12px 0 5px; }
+  input, select {
+    width: 100%; padding: 9px 11px; font-size: 14px; font-family: inherit;
+    border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--text);
+  }
+  input:focus, select:focus { outline: 2px solid #b9d2ff; outline-offset: -1px; border-color: #6a9bff; }
+  button {
+    padding: 8px 14px; font-size: 14px; font-weight: 600; font-family: inherit; color: #fff;
+    background: var(--blue); border: 0; border-radius: 7px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: var(--blue-dark); }
+  button:disabled { opacity: .55; cursor: not-allowed; }
+  button.full { width: 100%; margin-top: 16px; padding: 11px; }
+  button.ghost { background: none; color: var(--muted); font-weight: 500; padding: 4px 8px; }
+  button.ghost:hover:not(:disabled) { background: #eef0f3; }
+  button.small { padding: 4px 10px; font-size: 12px; }
+  button.liked { background: #e7f0ff; color: var(--blue); }
+  button.liked:hover:not(:disabled) { background: #d6e6ff; }
+
+  .msg { margin-top: 14px; padding: 10px 13px; border-radius: 8px; display: none; }
+  .msg.show { display: block; }
+  .msg.error { background: var(--err-bg); border: 1px solid var(--err-line); color: var(--err-text); }
+  .msg.ok    { background: var(--ok-bg);  border: 1px solid var(--ok-line);  color: var(--ok-text); }
+  .msg.info  { background: #eef4ff; border: 1px solid #c3d7fb; color: #1b4a8f; }
+  .msg.warn  { background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--warn-text); }
+
+  .topbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; justify-content: space-between; margin-bottom: 16px; }
+  .who { color: var(--muted); font-size: 13px; }
+  .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0 12px; align-items: end; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 6px; }
+  .tab {
+    background: none; color: var(--muted); border-radius: 0; padding: 10px 14px; font-weight: 600;
+    border-bottom: 2px solid transparent;
+  }
+  .tab:hover:not(:disabled) { background: none; color: var(--text); }
+  .tab.active[data-platform="instagram"] { color: var(--ig); border-bottom-color: var(--ig); }
+  .tab.active[data-platform="facebook"] { color: var(--blue); border-bottom-color: var(--blue); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; margin-top: 18px; align-items: start; }
+  .post { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fff; }
+  .post img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block; background: #eef0f3; }
+  .post .noimg { aspect-ratio: 3 / 1; display: flex; align-items: center; justify-content: center; color: var(--muted); background: #f3f4f6; font-size: 12px; }
+  .post .body { padding: 12px 14px; }
+  .caption { white-space: pre-wrap; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .caption.empty { color: var(--muted); font-style: italic; }
+  .meta { color: var(--muted); font-size: 12px; margin-top: 6px; display: flex; justify-content: space-between; gap: 8px; }
+  .meta a { color: var(--muted); }
+  .counts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
+  .pill { background: #f0f2f5; border-radius: 12px; padding: 2px 9px; font-size: 12px; white-space: nowrap; }
+  .pill.total { font-weight: 600; }
+  .actions { display: flex; gap: 8px; margin-top: 10px; align-items: center; flex-wrap: wrap; }
+  .note { color: var(--muted); font-size: 12px; }
+
+  .comments { border-top: 1px solid var(--line); background: #fafbfc; padding: 8px 14px 12px; display: none; }
+  .comments.show { display: block; }
+  .comment { padding: 8px 0; border-bottom: 1px solid #eceef1; }
+  .comment:last-child { border-bottom: 0; }
+  .comment .head { font-size: 12px; color: var(--muted); }
+  .comment .head strong { color: var(--text); }
+  .comment .text { white-space: pre-wrap; word-break: break-word; margin: 2px 0 4px; }
+  .comment .row { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
+  .replies { margin-left: 18px; border-left: 2px solid #e4e6eb; padding-left: 10px; }
+  .replies:empty { display: none; }
+  .composer { display: flex; gap: 6px; margin: 8px 0; }
+  .composer input { flex: 1; padding: 6px 9px; font-size: 13px; }
+  .composer button { padding: 6px 12px; font-size: 13px; }
+  .center { text-align: center; margin-top: 18px; }
+  .empty { padding: 30px; text-align: center; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ── Sign in ─────────────────────────────────────────────────────────── -->
+  <div class="card narrow" id="loginCard">
+    <h1>Posts &amp; Comments</h1>
+    <p class="sub">Sign in to see your Instagram and Facebook posts.</p>
+    <div id="loginStep1">
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username" placeholder="you@company.com" />
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" />
+      <button class="full" id="btnLogin">Sign in</button>
+    </div>
+    <div id="loginStep2" style="display:none">
+      <label for="code">Verification code</label>
+      <input id="code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code from your email" />
+      <button class="full" id="btnVerify">Verify &amp; continue</button>
+    </div>
+    <div id="loginMsg" class="msg"></div>
+  </div>
+
+  <!-- ── App ─────────────────────────────────────────────────────────────── -->
+  <div class="card" id="appCard" style="display:none">
+    <div class="topbar">
+      <div>
+        <h1>Posts &amp; Comments</h1>
+        <div class="who">Signed in as <strong id="whoName"></strong> · <button class="ghost" id="btnLogout">Sign out</button></div>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-platform="instagram">Instagram</button>
+      <button class="tab" data-platform="facebook">Facebook</button>
+    </div>
+
+    <div class="controls">
+      <div><label for="business">Business</label><select id="business"></select></div>
+      <div><label for="account" id="accountLabel">Instagram account</label><select id="account"></select></div>
+      <div>
+        <label for="filter">Show</label>
+        <select id="filter">
+          <option value="all">All posts</option>
+          <option value="commented">Posts with comments</option>
+          <option value="uncommented">Posts without comments</option>
+        </select>
+      </div>
+      <div><button id="btnRefresh" style="width:100%;margin-top:12px">Refresh</button></div>
+    </div>
+
+    <div id="msg" class="msg"></div>
+    <div class="grid" id="grid"></div>
+    <div class="center"><button class="ghost" id="loadMore" style="display:none">Load more posts</button></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var API = window.location.origin;
+  var REACTIONS = [['LIKE', '👍'], ['LOVE', '❤️'], ['CARE', '🥰'], ['HAHA', '😂'], ['WOW', '😮'], ['SAD', '😢'], ['ANGRY', '😡']];
+  var auth = { token: null, user: null };
+  var platform = 'instagram';
+  var nextCursor = null;
+  var shown = 0;
+
+  var $ = function (id) { return document.getElementById(id); };
+  function say(id, text, kind) {
+    var m = $(id);
+    if (!text) { m.className = 'msg'; return; }
+    m.textContent = text;
+    m.className = 'msg show ' + (kind || 'info');
+  }
+  function el(tag, text, cls) {
+    var e = document.createElement(tag);
+    if (text !== undefined && text !== null) e.textContent = text;
+    if (cls) e.className = cls;
+    return e;
+  }
+  function api(method, path, body) {
+    var opts = { method: method, headers: { 'Content-Type': 'application/json' } };
+    if (auth.token) opts.headers.Authorization = 'Bearer ' + auth.token;
+    if (body) opts.body = JSON.stringify(body);
+    return fetch(API + path, opts).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (b) {
+        if (r.status === 401) { logout(); throw new Error('Session expired — sign in again.'); }
+        if (!r.ok) throw new Error(b.message || ('Request failed (' + r.status + ')'));
+        return b;
+      });
+    });
+  }
+  function bizId() { return Number($('business').value); }
+  function qs(params) {
+    params.business_id = bizId();
+    var out = {};
+    Object.keys(params).forEach(function (k) { if (params[k] !== '' && params[k] !== null && params[k] !== undefined) out[k] = params[k]; });
+    return '?' + new URLSearchParams(out).toString();
+  }
+  function when(iso) { return iso ? new Date(iso).toLocaleString() : ''; }
+
+  // ── Sign in (shares the session the other pages store) ────────────────────
+  try {
+    var saved = JSON.parse(sessionStorage.getItem('smm_auth') || 'null');
+    if (saved && saved.token) auth = saved;
+  } catch (e) {}
+
+  $('btnLogin').addEventListener('click', function () {
+    var email = $('email').value.trim(), password = $('password').value;
+    if (!email || !password) { say('loginMsg', 'Enter your email and password.', 'error'); return; }
+    api('POST', '/auth/login', { email: email, password: password })
+      .then(function () {
+        $('loginStep1').style.display = 'none'; $('loginStep2').style.display = 'block';
+        say('loginMsg', 'We emailed a 6-digit code to ' + email + '.', 'info');
+      })
+      .catch(function (e) { say('loginMsg', e.message, 'error'); });
+  });
+  $('btnVerify').addEventListener('click', function () {
+    api('POST', '/auth/verify-2fa', { email: $('email').value.trim(), code: $('code').value.trim() })
+      .then(function (b) {
+        auth = { token: b.token, user: b.user };
+        try { sessionStorage.setItem('smm_auth', JSON.stringify(auth)); } catch (e) {}
+        enterApp();
+      })
+      .catch(function (e) { say('loginMsg', e.message, 'error'); });
+  });
+  function logout() {
+    auth = { token: null, user: null };
+    try { sessionStorage.removeItem('smm_auth'); } catch (e) {}
+    $('appCard').style.display = 'none'; $('loginCard').style.display = 'block';
+    $('loginStep1').style.display = 'block'; $('loginStep2').style.display = 'none';
+  }
+  $('btnLogout').addEventListener('click', logout);
+
+  function enterApp() {
+    var u = auth.user || {};
+    var list = u.businesses || [];
+    $('whoName').textContent = u.name || u.email || 'you';
+    $('loginCard').style.display = 'none'; $('appCard').style.display = 'block';
+    var sel = $('business'); sel.innerHTML = '';
+    if (!list.length) {
+      sel.appendChild(el('option', 'No business on this account')); sel.disabled = true;
+      say('msg', 'This account does not belong to any business.', 'warn');
+      return;
+    }
+    list.forEach(function (b) { var o = el('option', b.name); o.value = b.id; sel.appendChild(o); });
+    loadAccounts();
+  }
+
+  // ── Platform, account, filter ─────────────────────────────────────────────
+  Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (t) {
+    t.addEventListener('click', function () {
+      Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (x) { x.classList.remove('active'); });
+      t.classList.add('active');
+      platform = t.dataset.platform;
+      $('accountLabel').textContent = platform === 'instagram' ? 'Instagram account' : 'Facebook Page';
+      loadAccounts();
+    });
+  });
+  $('business').addEventListener('change', loadAccounts);
+  $('account').addEventListener('change', function () { loadPosts(true); });
+  $('filter').addEventListener('change', function () { loadPosts(true); });
+  $('btnRefresh').addEventListener('click', function () { loadPosts(true); });
+  $('loadMore').addEventListener('click', function () { loadPosts(false); });
+
+  // Facebook Pages are the ones connected for Messenger.
+  function loadAccounts() {
+    var sel = $('account'); sel.innerHTML = '';
+    $('grid').innerHTML = ''; $('loadMore').style.display = 'none'; say('msg', '');
+    var path = platform === 'instagram' ? '/api/v1/instagram/accounts' : '/api/v1/messenger/accounts';
+    api('GET', path + qs({}))
+      .then(function (b) {
+        var active = (b.accounts || []).filter(function (a) { return a.is_active; });
+        if (!active.length) {
+          sel.appendChild(el('option', 'Nothing connected'));
+          say('msg', platform === 'instagram'
+            ? 'No Instagram account is connected to this business — connect one first.'
+            : 'No Facebook Page is connected to this business — connect one from the Messenger connect page.', 'warn');
+          return;
+        }
+        active.forEach(function (a) {
+          var label = platform === 'instagram' ? (a.username ? '@' + a.username : a.ig_user_id) : (a.page_name || a.page_id);
+          var o = el('option', label); o.value = a.id; sel.appendChild(o);
+        });
+        loadPosts(true);
+      })
+      .catch(function (e) { say('msg', e.message, 'error'); });
+  }
+
+  // ── Posts ─────────────────────────────────────────────────────────────────
+  function loadPosts(reset) {
+    if (!$('account').value) return;
+    if (reset) { nextCursor = null; shown = 0; $('grid').innerHTML = ''; }
+    $('loadMore').disabled = true;
+    say('msg', 'Loading posts…', 'info');
+    api('GET', '/api/v1/posts' + qs({
+      platform: platform, account_id: $('account').value, filter: $('filter').value, after: nextCursor || ''
+    }))
+      .then(function (b) {
+        say('msg', '');
+        b.posts.forEach(function (p) { $('grid').appendChild(postCard(p)); });
+        shown += b.posts.length;
+        nextCursor = b.next;
+        $('loadMore').style.display = nextCursor ? 'inline-block' : 'none';
+        $('loadMore').disabled = false;
+        if (!shown) {
+          // The filter is applied per page of posts, so keep looking while Meta has more.
+          if (nextCursor) { loadPosts(false); return; }
+          var empty = el('div', $('filter').value === 'all' ? 'No posts yet.' : 'No posts match this filter.', 'empty');
+          $('grid').appendChild(empty);
+        }
+      })
+      .catch(function (e) { $('loadMore').disabled = false; say('msg', e.message, 'error'); });
+  }
+
+  function reactionPills(box, p) {
+    box.innerHTML = '';
+    if (p.platform === 'instagram') {
+      box.appendChild(el('span', '❤️ ' + p.reactions.total + ' likes', 'pill total'));
+    } else {
+      box.appendChild(el('span', p.reactions.total + ' reactions', 'pill total'));
+      REACTIONS.forEach(function (r) {
+        if (p.reactions[r[0]]) box.appendChild(el('span', r[1] + ' ' + p.reactions[r[0]], 'pill'));
+      });
+    }
+    box.appendChild(el('span', '💬 ' + p.comments_count + ' comments', 'pill'));
+  }
+
+  function postCard(p) {
+    var card = el('div', null, 'post');
+    if (p.image_url) {
+      var img = el('img'); img.src = p.image_url; img.alt = ''; img.loading = 'lazy';
+      img.onerror = function () { img.replaceWith(el('div', 'Image unavailable', 'noimg')); };
+      card.appendChild(img);
+    } else {
+      card.appendChild(el('div', p.media_type === 'TEXT' ? 'Text post' : 'No preview', 'noimg'));
+    }
+
+    var body = el('div', null, 'body');
+    body.appendChild(el('div', p.caption || 'No caption', 'caption' + (p.caption ? '' : ' empty')));
+    var meta = el('div', null, 'meta');
+    meta.appendChild(el('span', when(p.created_at)));
+    if (p.permalink) { var a = el('a', 'Open ↗'); a.href = p.permalink; a.target = '_blank'; a.rel = 'noopener'; meta.appendChild(a); }
+    body.appendChild(meta);
+
+    var counts = el('div', null, 'counts');
+    reactionPills(counts, p);
+    body.appendChild(counts);
+
+    var actions = el('div', null, 'actions');
+    if (p.can_react) actions.appendChild(likeButton(p.id, !!p.viewer_reaction, function (liked) {
+      // Keep the counts honest without refetching the whole page.
+      var delta = liked ? 1 : -1;
+      p.reactions.total += delta; p.reactions.LIKE = Math.max(0, (p.reactions.LIKE || 0) + delta);
+      p.viewer_reaction = liked ? 'LIKE' : null;
+      reactionPills(counts, p);
+    }));
+    else actions.appendChild(el('span', "Instagram's API doesn't allow liking — counts only.", 'note'));
+
+    // Comments panel: a composer for the post, then the comment list.
+    var comments = el('div', null, 'comments');
+    var list = el('div');
+    var toggleLabel = function () { return p.comments_count ? 'View comments (' + p.comments_count + ')' : '💬 Comment'; };
+    var toggle = el('button', toggleLabel(), 'ghost small');
+    // Called whenever a comment or reply is added from this page.
+    p.onCommentAdded = function () {
+      p.comments_count += 1;
+      reactionPills(counts, p);
+      if (!comments.classList.contains('show')) toggle.textContent = toggleLabel();
+    };
+    comments.appendChild(composer('Write a comment…', function (text, done) {
+      sendComment(p, p.id, 'post', text, function (c) {
+        list.insertBefore(commentNode(c, p, null), list.firstChild);
+        p.onCommentAdded();
+      }, done);
+    }));
+    comments.appendChild(list);
+    toggle.addEventListener('click', function () {
+      var open = comments.classList.toggle('show');
+      toggle.textContent = open ? 'Hide comments' : toggleLabel();
+      if (open && !list.dataset.loaded) {
+        if (p.comments_count) loadComments(p, list, null);
+        else list.dataset.loaded = '1'; // nothing to fetch; comments added here are already shown
+      }
+    });
+    actions.appendChild(toggle);
+    body.appendChild(actions);
+
+    card.appendChild(body);
+    card.appendChild(comments);
+    return card;
+  }
+
+  // Like / unlike as the Page (Facebook only). onChange(liked) after success.
+  function likeButton(objectId, liked, onChange) {
+    var btn = el('button', null, 'small');
+    function paint() { btn.textContent = liked ? '✓ Liked' : '👍 Like'; btn.className = 'small' + (liked ? ' liked' : ''); }
+    paint();
+    btn.addEventListener('click', function () {
+      btn.disabled = true;
+      api('POST', '/api/v1/posts/reactions', {
+        business_id: bizId(), platform: 'facebook', account_id: Number($('account').value),
+        object_id: objectId, action: liked ? 'unlike' : 'like'
+      })
+        .then(function () { liked = !liked; paint(); if (onChange) onChange(liked); })
+        .catch(function (e) { say('msg', e.message, 'error'); })
+        .then(function () { btn.disabled = false; });
+    });
+    return btn;
+  }
+
+  // ── Comments ──────────────────────────────────────────────────────────────
+  function loadComments(p, box, after) {
+    var loading = el('div', 'Loading comments…', 'note');
+    box.appendChild(loading);
+    api('GET', '/api/v1/posts/' + encodeURIComponent(p.id) + '/comments' + qs({
+      platform: p.platform, account_id: $('account').value, after: after || ''
+    }))
+      .then(function (b) {
+        loading.remove();
+        box.dataset.loaded = '1';
+        if (!b.comments.length && !after) box.appendChild(el('div', 'No comments visible.', 'note'));
+        b.comments.forEach(function (c) { box.appendChild(commentNode(c, p, null)); });
+        if (b.next) {
+          var more = el('button', 'More comments', 'ghost small');
+          more.addEventListener('click', function () { more.remove(); loadComments(p, box, b.next); });
+          box.appendChild(more);
+        }
+      })
+      .catch(function (e) { loading.remove(); box.appendChild(el('div', e.message, 'note')); });
+  }
+
+  // parent: the top-level comment this one replies to, or null when it is top-level.
+  // Replies stay one level deep (Instagram only allows that), so "Reply" on a
+  // reply answers its top-level comment.
+  function commentNode(c, p, parent) {
+    var plat = p.platform;
+    var node = el('div', null, 'comment');
+    var head = el('div', null, 'head');
+    head.appendChild(el('strong', c.author || 'Someone'));
+    head.appendChild(document.createTextNode(' · ' + when(c.created_at)));
+    node.appendChild(head);
+    node.appendChild(el('div', c.text, 'text'));
+
+    var row = el('div', null, 'row');
+    var count = el('span', (plat === 'instagram' ? '❤️ ' : '👍 ') + c.like_count);
+    row.appendChild(count);
+    if (c.can_react) row.appendChild(likeButton(c.id, !!c.liked_by_page, function (liked) {
+      c.like_count = Math.max(0, c.like_count + (liked ? 1 : -1));
+      count.textContent = '👍 ' + c.like_count;
+    }));
+
+    var thread = parent || { comment: c, replies: null };
+    var replyBtn = el('button', 'Reply', 'ghost small');
+    row.appendChild(replyBtn);
+    node.appendChild(row);
+
+    var replyBox = el('div');
+    node.appendChild(replyBox);
+    replyBtn.addEventListener('click', function () {
+      if (replyBox.firstChild) { replyBox.innerHTML = ''; return; }
+      var mention = parent && plat === 'instagram' && c.author ? c.author.replace(/^@?/, '@') + ' ' : '';
+      var form = composer('Reply to ' + (c.author || 'comment') + '…', function (text, done) {
+        sendComment(p, thread.comment.id, 'comment', text, function (r) {
+          thread.replies.appendChild(commentNode(r, p, thread));
+          replyBox.innerHTML = '';
+          p.onCommentAdded();
+        }, done);
+      });
+      replyBox.appendChild(form);
+      var input = form.querySelector('input');
+      input.value = mention;
+      input.focus();
+    });
+
+    if (!parent) {
+      thread.replies = el('div', null, 'replies');
+      (c.replies || []).forEach(function (r) { thread.replies.appendChild(commentNode(r, p, thread)); });
+      node.appendChild(thread.replies);
+    }
+    return node;
+  }
+
+  // Text box + send button. onSend(text, done) — call done() when finished.
+  function composer(placeholder, onSend) {
+    var form = el('div', null, 'composer');
+    var input = el('input'); input.placeholder = placeholder; input.maxLength = 2200;
+    var btn = el('button', 'Send');
+    function send() {
+      var text = input.value.trim();
+      if (!text) return;
+      btn.disabled = true; input.disabled = true;
+      onSend(text, function (ok) {
+        btn.disabled = false; input.disabled = false;
+        if (ok) input.value = '';
+      });
+    }
+    btn.addEventListener('click', send);
+    input.addEventListener('keydown', function (e) { if (e.key === 'Enter') send(); });
+    form.appendChild(input); form.appendChild(btn);
+    return form;
+  }
+
+  // target 'post' comments on the post; 'comment' replies to objectId.
+  function sendComment(p, objectId, target, text, onCreated, done) {
+    api('POST', '/api/v1/posts/comments', {
+      business_id: bizId(), platform: p.platform, account_id: Number($('account').value),
+      object_id: objectId, target: target, message: text
+    })
+      .then(function (b) { onCreated(b.comment); done(true); })
+      .catch(function (e) { say('msg', e.message, 'error'); done(false); });
+  }
+
+  if (auth.token && auth.user) enterApp();
+})();
+</script>
+</body>
+</html>

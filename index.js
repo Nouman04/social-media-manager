@@ -25,6 +25,7 @@ const planRoutes = require("./src/routes/planRoutes");
 const subscriptionRoutes = require("./src/routes/subscriptionRoutes");
 const contactRoutes = require("./src/routes/contactRoutes");
 const campaignRoutes = require("./src/routes/campaignRoutes");
+const socialPostRoutes = require("./src/routes/socialPostRoutes");
 
 const app = express();
 const PORT = process.env.NODE_PORT || process.env.PORT || 5000;
@@ -58,6 +59,7 @@ app.use("/api/v1/messenger", messengerRoutes);
 app.use("/api/v1/meta", metaWebhookRoutes);
 app.use("/api/v1/contacts", contactRoutes);
 app.use("/api/v1/campaigns", campaignRoutes);
+app.use("/api/v1/posts", socialPostRoutes);
 app.use("/users", userRoutes);
 app.use("/countries", countryRoutes);
 app.use("/plans", planRoutes);

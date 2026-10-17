@@ -18,7 +18,7 @@ router.put('/roles/:id', rbacController.updateRole);
 router.delete('/roles/:id', rbacController.deleteRole);
 
 // Permission CRUD
-router.post('/permissions', rbacController.createPermission);
+// router.post('/permissions', rbacController.createPermission);
 router.get('/permissions', rbacController.getPermissions);
 router.get('/permissions/:id', rbacController.getPermissionById);
 router.put('/permissions/:id', rbacController.updatePermission);
