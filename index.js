@@ -32,13 +32,14 @@ const PORT = process.env.NODE_PORT || process.env.PORT || 5000;
 
 initializePassport(passport);
 
-const stripeWebhookRoutes = require("./src/routes/stripeWebhookRoutes");
+// Stripe disabled: subscriptions are approved manually (/subscriptions/requests).
+// const stripeWebhookRoutes = require("./src/routes/stripeWebhookRoutes");
 
 app.use(requestContext);
 app.use(cors());
 
 // Stripe Webhook needs raw body, mount it before body-parser
-app.use("/api/v1/stripe", stripeWebhookRoutes);
+// app.use("/api/v1/stripe", stripeWebhookRoutes);
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -60,13 +61,35 @@ app.use("/api/v1/meta", metaWebhookRoutes);
 app.use("/api/v1/contacts", contactRoutes);
 app.use("/api/v1/campaigns", campaignRoutes);
 app.use("/api/v1/posts", socialPostRoutes);
+app.use("/api/v1/inbox", require("./src/routes/inboxRoutes"));
+app.use("/api/v1/tags", require("./src/routes/tagRoutes"));
+app.use("/api/v1/dashboard", require("./src/routes/dashboardRoutes"));
+const crmRoutes = require("./src/routes/crmRoutes");
+app.use("/api/v1/pipeline", crmRoutes.pipeline);
+app.use("/api/v1/deals", crmRoutes.deals);
+app.use("/api/v1/tickets", crmRoutes.tickets);
+app.use("/api/v1/ticket-categories", crmRoutes.categories);
+app.use("/api/v1/sla-policies", crmRoutes.sla);
 app.use("/users", userRoutes);
 app.use("/countries", countryRoutes);
 app.use("/plans", planRoutes);
 app.use("/subscriptions", subscriptionRoutes);
+app.use("/admin", require("./src/routes/adminRoutes"));
 
 app.get("/", (req, res) => {
   res.json({ success: true, message: "SMM API Server Running" });
+});
+
+// Malformed JSON body (e.g. an unquoted uuid): answer with a clear 400 JSON instead of Express's HTML error page.
+app.use((err, req, res, next) => {
+  if (err.type === "entity.parse.failed") {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid JSON body",
+      details: [err.message, "Strings such as uuids must be in double quotes, e.g. \"business_uuid\": \"78c2fac4-...\""],
+    });
+  }
+  return next(err);
 });
 app.get("/pricing", (req, res) => {
   res.sendFile(path.join(__dirname, "src/public/pricing.html"));
@@ -100,5 +123,25 @@ server.listen(PORT, () => {
 // Campaign sends run from the BullMQ queue (Redis at REDIS_URL, default
 // redis://127.0.0.1:6379). Jobs survive restarts and resume here.
 campaignQueue.startWorker(campaignService.processRecipient);
+
+// Manual (admin-approved) subscriptions expire after ends_at. Hourly is plenty.
+const { expireManualSubscriptions } = require("./src/controllers/subscriptionRequestController");
+const runExpiry = () => expireManualSubscriptions()
+  .then(n => n && console.log(`[subscriptions] expired ${n} manual subscription(s)`))
+  .catch(err => console.warn("[subscriptions] expiry job failed:", err.message));
+setTimeout(runExpiry, 10 * 1000);
+setInterval(runExpiry, 60 * 60 * 1000);
+
+// Ticket SLA: recompute on_track / at_risk / breached and announce breaches.
+const { refreshSla } = require("./src/services/ticketService");
+setInterval(() => refreshSla()
+  .then(n => n && console.log(`[tickets] SLA updated on ${n} ticket(s)`))
+  .catch(err => console.warn("[tickets] SLA job failed:", err.message)), 60 * 1000);
+
+// Snoozed inbox conversations reopen at snoozed_until.
+const { wakeSnoozed } = require("./src/services/inboxService");
+setInterval(() => wakeSnoozed()
+  .then(n => n && console.log(`[inbox] reopened ${n} snoozed conversation(s)`))
+  .catch(err => console.warn("[inbox] snooze job failed:", err.message)), 60 * 1000);
 
 module.exports = app;

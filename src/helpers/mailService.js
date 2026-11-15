@@ -87,7 +87,28 @@ const sendInvitationEmail = async (email, link, businessName, inviterName, expir
   }
 };
 
+/**
+ * Plain notification email (subscription request created / approved / rejected).
+ * Never throws: a mail outage must not fail the API call that triggered it.
+ */
+const sendNotificationEmail = async (email, subject, text) => {
+  try {
+    const info = await createTransport().sendMail({
+      from: process.env.MAIL_FROM || '"SMM Support" <no-reply@smm.com>',
+      to: email,
+      subject,
+      text,
+    });
+    console.log(`[MailService] Notification sent to ${email}: ${info.messageId}`);
+    return info;
+  } catch (error) {
+    console.warn(`[MailService] Could not send "${subject}" to ${email}`, error.message);
+    return null;
+  }
+};
+
 module.exports = {
   send2FACodeEmail,
   sendInvitationEmail,
+  sendNotificationEmail,
 };

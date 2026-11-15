@@ -45,10 +45,15 @@ const planUpdateSchema = Joi.object({
 // ─── Subscription ────────────────────────────────────────────────────────────
 
 const subscriptionCreateSchema = Joi.object({
-  business_id: Joi.number().integer().positive().required(),
-  plan_id: Joi.number().integer().positive().required(),
-  stripe_subscription_id: Joi.string().trim().max(255).required(),
-  stripe_status: Joi.string().trim().max(50).default('incomplete'),
+  // Businesses and plans are addressed by their public uuid; the controller maps them to ids.
+  business_uuid: Joi.string().trim().guid().required(),
+  // Plans are addressed by their public uuid; the controller maps it to plan_id.
+  plan_uuid: Joi.string().trim().guid().required(),
+  // Manual billing: no Stripe fields. The controller fills the internal subscription id.
+  // stripe_subscription_id: Joi.string().trim().max(255).required(),
+  // stripe_status: Joi.string().trim().max(50).default('incomplete'),
+  // Lifecycle status (subscriptions.status). `rejected` only comes from rejecting a request.
+  status: Joi.string().valid('pending', 'active', 'cancelled', 'expired').default('active'),
   trial_ends_at: Joi.date().allow(null).optional(),
   current_period_start: Joi.date().allow(null).optional(),
   current_period_end: Joi.date().allow(null).optional(),
@@ -56,8 +61,10 @@ const subscriptionCreateSchema = Joi.object({
 });
 
 const subscriptionUpdateSchema = Joi.object({
-  plan_id: Joi.number().integer().positive().optional(),
-  stripe_status: Joi.string().trim().max(50).optional(),
+  // Plans are addressed by their public uuid; the controller maps it to plan_id.
+  plan_uuid: Joi.string().trim().guid().optional(),
+  // stripe_status: Joi.string().trim().max(50).optional(),
+  status: Joi.string().valid('pending', 'active', 'cancelled', 'expired').optional(),
   trial_ends_at: Joi.date().allow(null).optional(),
   current_period_start: Joi.date().allow(null).optional(),
   current_period_end: Joi.date().allow(null).optional(),

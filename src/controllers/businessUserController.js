@@ -103,7 +103,7 @@ module.exports = {
       const activeSubscription = await Subscription.findOne({
         where: {
           business_id,
-          stripe_status: ['trialing', 'active'],
+          status: 'active', // manual billing lifecycle (was stripe_status)
         },
         include: [{
           model: Plan, as: 'plan',
@@ -722,7 +722,7 @@ module.exports = {
       const activeSubscription = await Subscription.findOne({
         where: {
           business_id,
-          stripe_status: ['trialing', 'active'],
+          status: 'active', // manual billing lifecycle (was stripe_status)
         },
         include: [{
           model: Plan, as: 'plan',

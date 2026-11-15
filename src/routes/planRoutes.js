@@ -15,8 +15,8 @@ router.use((req, res, next) => {
 // ─── Plans CRUD ──────────────────────────────────────────────────────────────
 router.post('/', planController.createPlan);
 router.get('/', planController.getPlans);
-router.get('/:id', planController.getPlanById);
-router.put('/:id', planController.updatePlan);
-router.delete('/:id', planController.deletePlan);
+router.get('/:uuid', planController.getPlanById);
+router.put('/:uuid', planController.updatePlan);
+router.delete('/:uuid', planController.deletePlan);
 
 module.exports = router;

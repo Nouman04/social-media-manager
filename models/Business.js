@@ -7,6 +7,13 @@ module.exports = (sequelize, DataTypes) => {
       autoIncrement: true,
       allowNull: false,
     },
+    // Public id used in URLs (e.g. admin subscription history).
+    uuid: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      allowNull: false,
+      unique: true,
+    },
     created_by: {
       type: DataTypes.INTEGER,
       allowNull: false,

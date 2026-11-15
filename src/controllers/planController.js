@@ -5,7 +5,16 @@ const {
   planCreateSchema,
   planUpdateSchema,
 } = require('../validations/planValidation');
-const stripe = process.env.STRIPE_SECRET ? require('stripe')(process.env.STRIPE_SECRET) : null;
+// Stripe disabled: plans are managed manually (subscription requests flow). Restore the line below to re-enable.
+// const stripe = process.env.STRIPE_SECRET ? require('stripe')(process.env.STRIPE_SECRET) : null;
+const stripe = null;
+
+// Plans are addressed by their public uuid in URLs (GET/PUT/DELETE /plans/:uuid).
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const badUuid = (res) =>
+  res.status(400).json({ success: false, message: 'Validation failed', details: ['uuid must be a valid UUID'] });
+// Stored lowercase and the column compares case-sensitively.
+const uuidWhere = (uuid) => ({ uuid: uuid.toLowerCase() });
 
 module.exports = {
 
@@ -28,33 +37,33 @@ module.exports = {
 
       const { features, ...planData } = value;
 
-      // Automatically create Stripe Product and Price if not provided
-      if (process.env.STRIPE_SECRET && !planData.stripe_product_id && !planData.stripe_price_id) {
-        try {
-          const product = await stripe.products.create({
-            name: planData.name,
-            description: planData.description || undefined,
-          });
-
-          const price = await stripe.prices.create({
-            product: product.id,
-            unit_amount: Math.round(planData.price * 100), // Stripe expects cents
-            currency: planData.currency || 'usd',
-            recurring: {
-              interval: planData.interval || 'month',
-            },
-          });
-
-          planData.stripe_product_id = product.id;
-          planData.stripe_price_id = price.id;
-        } catch (stripeErr) {
-          console.error('[planController.createPlan] Stripe Creation Error:', stripeErr);
-          // If stripe fails, we can either throw error or just continue without Stripe IDs.
-          // Since billing is core, we should probably fail.
-          await t.rollback();
-          return res.status(502).json({ success: false, message: 'Failed to create plan on Stripe', error: stripeErr.message });
-        }
-      }
+      // // Automatically create Stripe Product and Price if not provided
+      // if (stripe && !planData.stripe_product_id && !planData.stripe_price_id) {
+        // try {
+          // const product = await stripe.products.create({
+            // name: planData.name,
+            // description: planData.description || undefined,
+          // });
+// 
+          // const price = await stripe.prices.create({
+            // product: product.id,
+            // unit_amount: Math.round(planData.price * 100), // Stripe expects cents
+            // currency: planData.currency || 'usd',
+            // recurring: {
+              // interval: planData.interval || 'month',
+            // },
+          // });
+// 
+          // planData.stripe_product_id = product.id;
+          // planData.stripe_price_id = price.id;
+        // } catch (stripeErr) {
+          // console.error('[planController.createPlan] Stripe Creation Error:', stripeErr);
+          // // If stripe fails, we can either throw error or just continue without Stripe IDs.
+          // // Since billing is core, we should probably fail.
+          // await t.rollback();
+          // return res.status(502).json({ success: false, message: 'Failed to create plan on Stripe', error: stripeErr.message });
+        // }
+      // }
 
       const plan = await Plan.create(planData, { transaction: t });
 
@@ -97,6 +106,8 @@ module.exports = {
 
       const plans = await Plan.findAll({
         where,
+        // Billing is manual: the Stripe columns stay in the DB but are not returned.
+        attributes: { exclude: ['stripe_product_id', 'stripe_price_id'] },
         include: [{ model: PlanFeature, as: 'features', attributes: ['id', 'feature_name', 'feature_value'] }],
         order: [['sort_order', 'ASC'], ['id', 'ASC']],
       });
@@ -112,9 +123,14 @@ module.exports = {
   //  GET PLAN BY ID
   // ══════════════════════════════════════════════════════════════════════════
 
+  // GET /plans/:uuid — looked up by the public uuid, not the numeric id.
   getPlanById: async (req, res) => {
     try {
-      const plan = await Plan.findByPk(req.params.id, {
+      const { uuid } = req.params;
+      if (!UUID_RE.test(uuid)) return badUuid(res);
+
+      const plan = await Plan.findOne({
+        where: uuidWhere(uuid),
         include: [{ model: PlanFeature, as: 'features', attributes: ['id', 'feature_name', 'feature_value'] }],
       });
 
@@ -133,7 +149,9 @@ module.exports = {
   //  UPDATE PLAN
   // ══════════════════════════════════════════════════════════════════════════
 
+  // PUT /plans/:uuid
   updatePlan: async (req, res) => {
+    if (!UUID_RE.test(req.params.uuid)) return badUuid(res);
     const t = await sequelize.transaction();
     try {
       const { error, value } = planUpdateSchema.validate(req.body, { abortEarly: false });
@@ -146,7 +164,7 @@ module.exports = {
         });
       }
 
-      const plan = await Plan.findByPk(req.params.id, { transaction: t });
+      const plan = await Plan.findOne({ where: uuidWhere(req.params.uuid), transaction: t });
       if (!plan) {
         await t.rollback();
         return res.status(404).json({ success: false, message: 'Plan not found' });
@@ -155,50 +173,50 @@ module.exports = {
       const { features, ...planData } = value;
 
       if (Object.keys(planData).length > 0) {
-        // Stripe Update Logic
-        if (process.env.STRIPE_SECRET && plan.stripe_product_id) {
-          try {
-            // Update product if name, description, or active status changed
-            if (
-              (planData.name !== undefined && planData.name !== plan.name) ||
-              (planData.description !== undefined && planData.description !== plan.description) ||
-              (planData.is_active !== undefined && planData.is_active !== plan.is_active)
-            ) {
-              await stripe.products.update(plan.stripe_product_id, {
-                name: planData.name !== undefined ? planData.name : undefined,
-                description: planData.description !== undefined ? planData.description : undefined,
-                active: planData.is_active !== undefined ? planData.is_active : undefined,
-              });
-            }
-
-            // Stripe Prices are immutable. If price-related fields change, we must create a new Price.
-            const priceChanged = (planData.price !== undefined && planData.price !== plan.price);
-            const currencyChanged = (planData.currency !== undefined && planData.currency !== plan.currency);
-            const intervalChanged = (planData.interval !== undefined && planData.interval !== plan.interval);
-
-            if (priceChanged || currencyChanged || intervalChanged) {
-              // Archive old price
-              if (plan.stripe_price_id) {
-                await stripe.prices.update(plan.stripe_price_id, { active: false });
-              }
-
-              // Create new price
-              const newPrice = await stripe.prices.create({
-                product: plan.stripe_product_id,
-                unit_amount: Math.round((planData.price !== undefined ? planData.price : plan.price) * 100),
-                currency: planData.currency || plan.currency,
-                recurring: {
-                  interval: planData.interval || plan.interval,
-                },
-              });
-              planData.stripe_price_id = newPrice.id;
-            }
-          } catch (stripeErr) {
-            console.error('[planController.updatePlan] Stripe Update Error:', stripeErr);
-            await t.rollback();
-            return res.status(502).json({ success: false, message: 'Failed to update plan on Stripe', error: stripeErr.message });
-          }
-        }
+        // // Stripe Update Logic
+        // if (stripe && plan.stripe_product_id) {
+          // try {
+            // // Update product if name, description, or active status changed
+            // if (
+              // (planData.name !== undefined && planData.name !== plan.name) ||
+              // (planData.description !== undefined && planData.description !== plan.description) ||
+              // (planData.is_active !== undefined && planData.is_active !== plan.is_active)
+            // ) {
+              // await stripe.products.update(plan.stripe_product_id, {
+                // name: planData.name !== undefined ? planData.name : undefined,
+                // description: planData.description !== undefined ? planData.description : undefined,
+                // active: planData.is_active !== undefined ? planData.is_active : undefined,
+              // });
+            // }
+// 
+            // // Stripe Prices are immutable. If price-related fields change, we must create a new Price.
+            // const priceChanged = (planData.price !== undefined && planData.price !== plan.price);
+            // const currencyChanged = (planData.currency !== undefined && planData.currency !== plan.currency);
+            // const intervalChanged = (planData.interval !== undefined && planData.interval !== plan.interval);
+// 
+            // if (priceChanged || currencyChanged || intervalChanged) {
+              // // Archive old price
+              // if (plan.stripe_price_id) {
+                // await stripe.prices.update(plan.stripe_price_id, { active: false });
+              // }
+// 
+              // // Create new price
+              // const newPrice = await stripe.prices.create({
+                // product: plan.stripe_product_id,
+                // unit_amount: Math.round((planData.price !== undefined ? planData.price : plan.price) * 100),
+                // currency: planData.currency || plan.currency,
+                // recurring: {
+                  // interval: planData.interval || plan.interval,
+                // },
+              // });
+              // planData.stripe_price_id = newPrice.id;
+            // }
+          // } catch (stripeErr) {
+            // console.error('[planController.updatePlan] Stripe Update Error:', stripeErr);
+            // await t.rollback();
+            // return res.status(502).json({ success: false, message: 'Failed to update plan on Stripe', error: stripeErr.message });
+          // }
+        // }
 
         await plan.update(planData, { transaction: t });
       }
@@ -238,26 +256,28 @@ module.exports = {
   //  DELETE PLAN
   // ══════════════════════════════════════════════════════════════════════════
 
+  // DELETE /plans/:uuid
   deletePlan: async (req, res) => {
+    if (!UUID_RE.test(req.params.uuid)) return badUuid(res);
     const t = await sequelize.transaction();
     try {
-      const plan = await Plan.findByPk(req.params.id, { transaction: t });
+      const plan = await Plan.findOne({ where: uuidWhere(req.params.uuid), transaction: t });
       if (!plan) {
         await t.rollback();
         return res.status(404).json({ success: false, message: 'Plan not found' });
       }
 
-      // Archive on Stripe
-      if (process.env.STRIPE_SECRET && plan.stripe_product_id) {
-        try {
-          await stripe.products.update(plan.stripe_product_id, { active: false });
-        } catch (stripeErr) {
-          console.error('[planController.deletePlan] Stripe Archive Error:', stripeErr);
-          // We can warn but continue, or fail. We'll fail to be safe.
-          await t.rollback();
-          return res.status(502).json({ success: false, message: 'Failed to archive plan on Stripe', error: stripeErr.message });
-        }
-      }
+      // // Archive on Stripe
+      // if (stripe && plan.stripe_product_id) {
+        // try {
+          // await stripe.products.update(plan.stripe_product_id, { active: false });
+        // } catch (stripeErr) {
+          // console.error('[planController.deletePlan] Stripe Archive Error:', stripeErr);
+          // // We can warn but continue, or fail. We'll fail to be safe.
+          // await t.rollback();
+          // return res.status(502).json({ success: false, message: 'Failed to archive plan on Stripe', error: stripeErr.message });
+        // }
+      // }
 
       // Soft archive in our database instead of hard deleting
       plan.is_active = false;

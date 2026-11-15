@@ -57,6 +57,13 @@ router.use(authenticate);
 // ─── PROTECTED ROUTES (require valid JWT) ────────────────────────────────────
 
 /**
+ * GET /api/v1/whatsapp/number-health?business_id=&account_id=&refresh=true
+ * Dashboard widget: status, quality rating, tier and 24h limit used.
+ * refresh=true re-reads quality/tier from Meta first.
+ */
+router.get('/number-health', require('../middleware/authorizeBusiness'), require('../controllers/dashboardController').numberHealth);
+
+/**
  * GET /api/v1/whatsapp/verify-credentials?phone_number_id=&access_token=
  * Verify WhatsApp Business credentials against the Graph API.
  */

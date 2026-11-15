@@ -65,6 +65,17 @@ module.exports = (sequelize, DataTypes) => {
       onUpdate: 'CASCADE',
       onDelete: 'CASCADE',
     },
+    // ── Unified Inbox (see migrations/20261114100000-unified-inbox.js) ──
+    status: {
+      type: DataTypes.ENUM('open', 'pending', 'resolved', 'snoozed'),
+      allowNull: false,
+      defaultValue: 'open',
+    },
+    assigned_to: { type: DataTypes.INTEGER, allowNull: true },
+    snoozed_until: { type: DataTypes.DATE, allowNull: true },
+    last_message_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+    last_inbound_at: { type: DataTypes.DATE, allowNull: true },
+    last_inbound_message_id: { type: DataTypes.INTEGER, allowNull: true },
   }, {
     tableName: 'conversations',
     timestamps: true,
@@ -78,6 +89,7 @@ module.exports = (sequelize, DataTypes) => {
     }
     if (models.User) {
       Conversation.belongsTo(models.User, { foreignKey: 'created_by', as: 'creator' });
+      Conversation.belongsTo(models.User, { foreignKey: 'assigned_to', as: 'assignee' });
       Conversation.belongsToMany(models.User, {
         through: models.ConversationParticipant || 'conversation_participants',
         foreignKey: 'conversation_id',

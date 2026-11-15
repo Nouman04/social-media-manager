@@ -31,6 +31,9 @@ fs
     db[model.name] = model;
   });
 
+// A file may define helper models besides the one it returns (models/inbox.js).
+Object.assign(db, sequelize.models);
+
 Object.keys(db).forEach(modelName => {
   if (db[modelName].associate) {
     db[modelName].associate(db);
@@ -39,6 +42,8 @@ Object.keys(db).forEach(modelName => {
 
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
+
+require('../src/helpers/inboxHooks').register(db);
 
 // --- Global Audit Logging Hooks ---
 const IGNORED_TABLES = ['chats', 'chat_messages', 'attachments', 'activity_logs'];
